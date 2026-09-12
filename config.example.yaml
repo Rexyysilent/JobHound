@@ -1,0 +1,53 @@
+# Public starter template. All discovery, enrichment and delivery are OFF.
+# Copy to ignored config.yaml, then select sources and tune your policy.
+# Country/currency defaults in the legacy adapters are India/INR; configure them explicitly.
+engine:
+  active: v4.2
+  capture_snapshots: true
+sources:
+  remotive:
+    enabled: false
+  remoteok:
+    enabled: false
+  arbeitnow:
+    enabled: false
+  adzuna:
+    enabled: false
+  jsearch:
+    enabled: false
+  ats:
+    enabled: false
+  serp:
+    enabled: false
+email_ingest:
+  enabled: false
+  sender_platform_map: {}
+digest:
+  channels: []
+  join_nudges: 0
+incidents:
+  enabled: false
+report:
+  enabled: false
+scam:
+  llm:
+    enabled: false
+v55:
+  enabled: false
+  account_states: []
+region:
+  worldwide_terms:
+  - worldwide
+  - anywhere
+  - remote
+  india_terms: []
+  lang_terms: []
+relevance:
+  keywords:
+    boost_high:
+    - ai training
+    - data annotation
+    boost_mid:
+    - python
+    - automation
+    boost_lang: []

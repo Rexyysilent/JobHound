@@ -1,0 +1,42 @@
+# Local credentials and personal policy (only examples are public)
+.env
+.env.*
+!.env.example
+/config.yaml
+/profile.yaml
+/platform_registry.yaml
+/platforms_to_join.yaml
+keys/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime/research data, replay captures, logs and archives
+data/
+roadmap/
+private/
+review/
+dist/
+*.db
+*.db-*
+*.sqlite*
+*.log
+*.zip
+*.tar*
+*.ipynb
+
+# Environment, caches and editor metadata
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

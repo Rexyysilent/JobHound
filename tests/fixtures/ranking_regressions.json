@@ -1,0 +1,137 @@
+{
+  "kind": "synthetic_regression",
+  "jobs": [
+    {
+      "key": "farm_mysmartpros_stuffed",
+      "expect": "rejected_listing_quality",
+      "source": "jsearch",
+      "title": "Remote Data Annotation positions",
+      "company": "vmysmartpros",
+      "location": null,
+      "is_remote": true,
+      "region_tags": [
+        "worldwide"
+      ],
+      "pay_raw": null,
+      "description": "Synthetic listing for remote AI training, annotation and language evaluation. Review data and document quality issues. No further requirements are supplied.",
+      "url": "https://www.mysmartpros.com/jobs/example-1",
+      "posted_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "key": "farm_mysmartpros_second",
+      "expect": "rejected_listing_quality",
+      "source": "jsearch",
+      "title": "Data Annotation Project – Multiple languages",
+      "company": "vmysmartpros",
+      "location": null,
+      "is_remote": true,
+      "region_tags": [
+        "bengali",
+        "worldwide"
+      ],
+      "pay_raw": null,
+      "description": "Synthetic listing for remote AI training, annotation and language evaluation. Review data and document quality issues. No further requirements are supplied.",
+      "url": "https://www.mysmartpros.com/jobs/example-2",
+      "posted_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "key": "chiron_bengali_trainer",
+      "expect": "surfaced",
+      "source": "adzuna",
+      "title": "Project Chiron - Bengali Data Trainer",
+      "company": "Welo Global",
+      "location": "India",
+      "is_remote": true,
+      "region_tags": [
+        "india",
+        "bengali",
+        "worldwide"
+      ],
+      "pay_raw": null,
+      "description": "Review Bengali AI training output remotely. Evaluate language quality and annotate data. Fluent Bengali and English required. Work from India. No compensation is stated.",
+      "url": "https://www.adzuna.in/jobs/example-3",
+      "posted_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "key": "ngspice_electronics_reviewer",
+      "expect": "rejected_ineligible",
+      "source": "jsearch",
+      "title": "NgSpice Electronics Simulation Reviewer",
+      "company": "OpenTrain AI",
+      "location": null,
+      "is_remote": true,
+      "region_tags": [
+        "worldwide"
+      ],
+      "pay_raw": null,
+      "description": "Review electronics simulation using NgSpice. Circuit design experience is required for this specialist task. The position is remote in India.",
+      "url": "https://www.opentrain.ai/jobs/example-4",
+      "posted_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "key": "neuroscience_specialist",
+      "expect": "rejected_ineligible",
+      "source": "jsearch",
+      "title": "Neuroscience Specialist (AI Training Project)",
+      "company": "Gramian Consulting Group",
+      "location": null,
+      "is_remote": true,
+      "region_tags": [
+        "worldwide"
+      ],
+      "pay_raw": null,
+      "description": "Neuroscience specialist needed for expert review of neurobiology research. Domain expertise is mandatory. Work remotely from India.",
+      "url": "https://apply.workable.com/jobs/example-5",
+      "posted_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "key": "llm_delivery_leader",
+      "expect": "rejected_irrelevant",
+      "source": "jsearch",
+      "title": "LLM Training Delivery Leader",
+      "company": "OpenTrain AI",
+      "location": null,
+      "is_remote": true,
+      "region_tags": [
+        "india",
+        "worldwide"
+      ],
+      "pay_raw": null,
+      "description": "Lead AI training delivery and manage annotation teams. Coordinate data labeling and AI evaluation workflows. Requirements: 8+ years of experience in AI evaluation are required. This is a senior leadership position, remote in India.",
+      "url": "https://www.opentrain.ai/jobs/example-6",
+      "posted_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "key": "humanitapp_title_pay",
+      "expect": "rejected_listing_quality",
+      "source": "jsearch",
+      "title": "Data Science Experts | $120–$170/hr | Remote",
+      "company": "HumaniTapp",
+      "location": null,
+      "is_remote": true,
+      "region_tags": [
+        "worldwide"
+      ],
+      "pay_raw": null,
+      "description": "Synthetic listing for remote AI training, annotation and language evaluation. Review data and document quality issues. No further requirements are supplied.",
+      "url": "https://bebee.com/jobs/example-7",
+      "posted_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "key": "elite_job_mojibake",
+      "expect": "rejected_listing_quality",
+      "source": "jsearch",
+      "title": "AI Training Contributor â€“ Remote",
+      "company": "The Elite Job",
+      "location": null,
+      "is_remote": true,
+      "region_tags": [
+        "worldwide"
+      ],
+      "pay_raw": null,
+      "description": "Synthetic listing for remote AI training, annotation and language evaluation. Review data and document quality issues. No further requirements are supplied.",
+      "url": "https://www.theelitejob.com/jobs/example-8",
+      "posted_at": "2026-07-22T00:00:00Z"
+    }
+  ]
+}

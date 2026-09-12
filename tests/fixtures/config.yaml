@@ -1,0 +1,208 @@
+# Synthetic test policy; never an operator account snapshot.
+pay:
+  floor_usd: 4.5
+  hard_reject_usd_per_hour: 1.5
+  hours_per_year: 2080
+  hours_per_month: 173
+  fx_to_usd:
+    USD: 1.0
+    INR: 0.0115
+    EUR: 1.08
+    GBP: 1.27
+    CAD: 0.73
+    AUD: 0.66
+  piece_rate_per_hour:
+    task: 20
+    word: 500
+    audio_min: 6
+    image: 60
+scam:
+  threshold: 0.6
+  min_description_chars: 80
+  llm:
+    enabled: false
+    model: gemini-2.5-flash
+    band:
+    - 0.3
+    - 0.7
+    batch_size: 20
+    max_jobs_per_run: 60
+    min_interval_seconds: 9.5
+    max_calls_per_day: 40
+    max_retries: 3
+    retry_backoff_seconds: 2.0
+    retry_jitter_seconds: 1.0
+relevance:
+  fuzzy_threshold: 88
+  min_fit_to_surface: 32
+  keywords:
+    boost_high:
+    - rlhf
+    - ai training
+    - ai tutor
+    - data annotation
+    - model evaluation
+    - prompt engineer
+    - llm evaluation
+    - red team
+    - search evaluator
+    - ads quality rater
+    - sft
+    - dpo
+    boost_mid:
+    - python
+    - automation
+    - data entry specialist
+    - scraping
+    - web scraping
+    - etl
+    - data pipeline
+    - labeling
+    - transcription
+    - quality rater
+    - n8n
+    - zapier
+    - make.com
+    - webhook
+    - api integration
+    - whatsapp api
+    - workflow automation
+    - crm automation
+    exclude_hard:
+    - pay to apply
+    - registration fee
+    - commission only
+    - mlm
+    - network marketing
+    - reshipping
+    exclude_soft:
+    - unpaid intern
+    - equity only
+    - voice over
+    - adult content
+    - internship
+    - 'intern '
+scoring:
+  title_penalties:
+    senior_track:
+      pattern: \b(senior|sr\.?|lead|principal|staff|head of|director|vp|vice president|chief|architect|manager)\b
+      delta: -20
+    leadership_track:
+      pattern: \b(?:leader|director|vice\s+president|vp|chief|principal)\b|\bhead\s+of\b|\bhead\b(?=\s*(?:$|[,\-|:;()\[\]/]))
+      delta: 0
+      fit_cap: 30
+  easy_entry_boost: 15
+listing_quality:
+  tier_confidence:
+    ats: 0.9
+    board: 0.7
+    farm: 0.35
+    unknown: 0.55
+  free_host_scam_bump: 0.5
+  absurd_language_scam_bump: 0.4
+  free_host_confidence: 0.2
+  farm_domains:
+  - bebee.com
+  - up2staff.com
+  - mysmartpros.com
+  - learn4good.com
+  - whatjobs.com
+  - jobrapido.com
+  - jooble.org
+  - expertini.com
+  - jobgether.com
+  - himalayas.app
+  - jobleads.com
+  - theelitejob.com
+  - remoteanywherejob.com
+  - aigigjobs.com
+  - pbridgeco.com
+  farm_paths:
+  - /tuition/job/
+  - /tuition/jobs/
+feedback:
+  positive_scale: 1.0
+  diminishing_factor: 0.7
+  events:
+    paid_on_time:
+      payment_reliability: 0.05
+    paid_late:
+      payment_reliability: -0.1
+    unpaid_dispute:
+      payment_reliability: -0.25
+      support_quality: -0.1
+    ghosted_after_apply:
+      support_quality: -0.08
+    interview_ok:
+      onboarding_cost: 0.05
+      support_quality: 0.03
+    eq_extended:
+      work_consistency: -0.15
+    deactivated_no_reason:
+      account_stability: -0.25
+    id_verification_lockout:
+      account_stability: -0.15
+      onboarding_cost: -0.1
+    rate_cut:
+      payment_reliability: -0.1
+    good_project:
+      work_consistency: 0.05
+      support_quality: 0.03
+    scam_confirmed:
+      payment_reliability: -0.4
+      account_stability: -0.3
+    false_positive_scam: {}
+ranking:
+  freshness_half_life_days: 14
+  easy_entry_half_life_days: 45
+  unknown_age_freshness: 0.8
+  min_freshness: 0.1
+region:
+  worldwide_terms:
+  - worldwide
+  - anywhere
+  - remote
+  india_terms:
+  - india
+  - kolkata
+  - bengaluru
+  - bangalore
+  - mumbai
+  - delhi
+  - hyderabad
+  - ist
+  lang_terms:
+  - bengali
+  - bangla
+  - hindi
+  - multilingual
+  - indian languages
+engine:
+  active: v4.2
+trust:
+  registry_file: tests/fixtures/platform_registry.yaml
+digest:
+  channels:
+  - telegram
+  - email
+  join_nudges: 3
+sources:
+  adzuna:
+    searches:
+    - n8n automation
+  serp:
+    dorks:
+    - site:upwork.com "n8n" "webhook"
+  ats:
+    ashby:
+      lilt-production: LILT
+email_ingest:
+  enabled: false
+  sender_platform_map:
+    upwork.com: upwork
+incidents:
+  keywords:
+    not paying|unpaid wage|payment (?:issue|freeze|delay|problem): payment_reliability
+    deactivat|mass ban|suspend|locked out: account_stability
+    lawsuit|sued|class action|settlement: account_stability
+    lay ?off|shut(?:ting)? down|bankrupt|insolven: work_consistency

@@ -1,0 +1,334 @@
+# Synthetic scores for regression math, never real platform claims.
+platforms:
+  mercor:
+    display_name: Mercor
+    aliases:
+    - mercor
+    dims:
+      payment_reliability: 0.8
+      work_consistency: 0.8
+      account_stability: 0.8
+      support_quality: 0.8
+      onboarding_cost: 0.8
+    prior: 0.8
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  upwork:
+    display_name: Upwork
+    aliases:
+    - upwork
+    - upwork client
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  telus_oneforma:
+    display_name: TELUS Digital (OneForma)
+    aliases:
+    - telus international
+    - telus digital
+    - oneforma
+    - telus international ai
+    dims:
+      payment_reliability: 0.78
+      work_consistency: 0.78
+      account_stability: 0.78
+      support_quality: 0.78
+      onboarding_cost: 0.78
+    prior: 0.78
+    availability_est: 0.7
+    unpaid_overhead_est: 0.05
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  prolific:
+    display_name: Prolific
+    aliases:
+    - prolific
+    dims:
+      payment_reliability: 0.8
+      work_consistency: 0.8
+      account_stability: 0.8
+      support_quality: 0.8
+      onboarding_cost: 0.8
+    prior: 0.8
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  appen_crowdgen:
+    display_name: Appen / CrowdGen
+    aliases:
+    - appen
+    - crowdgen
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  rws_trainai:
+    display_name: RWS TrainAI
+    aliases:
+    - rws
+    - trainai
+    - rws group
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  alignerr:
+    display_name: Alignerr
+    aliases:
+    - alignerr
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.6
+    unpaid_overhead_est: 0.15
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  micro1:
+    display_name: Micro1
+    aliases:
+    - micro1
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  lxt:
+    display_name: LXT
+    aliases:
+    - lxt
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  toloka:
+    display_name: Toloka
+    aliases:
+    - toloka
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  dataannotation:
+    display_name: DataAnnotation.tech
+    aliases:
+    - dataannotation
+    - dataannotation tech
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  outlier:
+    display_name: Outlier (Scale AI)
+    aliases:
+    - outlier
+    - outlier ai
+    dims:
+      payment_reliability: 0.45
+      work_consistency: 0.45
+      account_stability: 0.45
+      support_quality: 0.45
+      onboarding_cost: 0.45
+    prior: 0.45
+    availability_est: 0.45
+    unpaid_overhead_est: 0.3
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  mindrift:
+    display_name: Mindrift
+    aliases:
+    - mindrift
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  remotasks:
+    display_name: Remotasks (Scale AI)
+    aliases:
+    - remotasks
+    dims:
+      payment_reliability: 0.35
+      work_consistency: 0.35
+      account_stability: 0.35
+      support_quality: 0.35
+      onboarding_cost: 0.35
+    prior: 0.35
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  turing:
+    display_name: Turing
+    aliases:
+    - turing
+    dims:
+      payment_reliability: 0.65
+      work_consistency: 0.65
+      account_stability: 0.65
+      support_quality: 0.65
+      onboarding_cost: 0.65
+    prior: 0.65
+    availability_est: 0.7
+    unpaid_overhead_est: 0.1
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.
+  welo_data:
+    display_name: Welo Data
+    aliases:
+    - welo data
+    - welodata
+    - welo
+    - welocalize
+    dims:
+      payment_reliability: 0.49
+      work_consistency: 0.49
+      account_stability: 0.49
+      support_quality: 0.49
+      onboarding_cost: 0.2
+    prior: 0.49
+    availability_est: 0.4
+    unpaid_overhead_est: 0.5
+    last_reviewed: '2026-01-01'
+    caveat: Synthetic test estimate, not a platform rating.
+    evidence:
+    - class: seed
+      date: '2026-01-01'
+      delta: 0.0
+      note: Synthetic arithmetic fixture; not a real incident or endorsement.

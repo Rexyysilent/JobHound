@@ -1,0 +1,82 @@
+# Synthetic checklist. No real account memberships.
+platforms:
+  mercor:
+    status: todo
+    language_fit: 0.6
+    signup_url: https://example.invalid/signup/mercor
+    note: Fictional checklist test entry.
+  upwork:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/upwork
+    note: Fictional checklist test entry.
+  telus_oneforma:
+    status: todo
+    language_fit: 0.9
+    signup_url: https://example.invalid/signup/telus_oneforma
+    note: Fictional checklist test entry.
+  prolific:
+    status: todo
+    language_fit: 0.3
+    signup_url: https://example.invalid/signup/prolific
+    note: Fictional checklist test entry.
+  appen_crowdgen:
+    status: todo
+    language_fit: 0.85
+    signup_url: https://example.invalid/signup/appen_crowdgen
+    note: Fictional checklist test entry.
+  rws_trainai:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/rws_trainai
+    note: Fictional checklist test entry.
+  alignerr:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/alignerr
+    note: Fictional checklist test entry.
+  micro1:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/micro1
+    note: Fictional checklist test entry.
+  lxt:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/lxt
+    note: Fictional checklist test entry.
+  toloka:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/toloka
+    note: Fictional checklist test entry.
+  dataannotation:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/dataannotation
+    note: Fictional checklist test entry.
+  outlier:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/outlier
+    note: Fictional checklist test entry.
+  mindrift:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/mindrift
+    note: Fictional checklist test entry.
+  remotasks:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/remotasks
+    note: Fictional checklist test entry.
+  turing:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/turing
+    note: Fictional checklist test entry.
+  welo_data:
+    status: todo
+    language_fit: 0.5
+    signup_url: https://example.invalid/signup/welo_data
+    note: Fictional checklist test entry.

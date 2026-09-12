@@ -1,0 +1,348 @@
+# Fictional multilingual test persona, not a biography or user profile.
+languages:
+- english
+- bengali
+- bangla
+- hindi
+credential_domains:
+- software
+- programming
+- data
+- automation
+- web scraping
+- gaming
+anchors:
+- bengali
+- bangla
+- hindi
+- python
+- javascript
+- automation
+- n8n
+- zapier
+- make.com
+- webhook
+- whatsapp api
+- api integration
+- workflow automation
+- power platform
+- crm automation
+- scraping
+- web scraping
+- data pipeline
+- etl
+- api
+- llm
+- prompt engineering
+- annotation
+- labeling
+- quality rater
+- search evaluator
+- coding
+- developer
+- no experience
+- no degree
+working_languages: []
+capability_domains: []
+demonstrated_skills: []
+formal_credentials: []
+absent_formal_credentials: []
+documented_professional_years: {}
+target_lanes: []
+allowed_seniority:
+- entry
+- junior
+- mid
+max_required_years: 2
+role_concepts:
+  language_ai:
+  - bengali
+  - bangla
+  - hindi
+  - multilingual
+  - translation
+  - localization
+  - linguist
+  ai_evaluation:
+  - rlhf
+  - sft
+  - dpo
+  - ai training
+  - model evaluation
+  - llm evaluation
+  - search evaluator
+  - quality rater
+  - ai tutor
+  - red teaming
+  annotation:
+  - annotation
+  - annotator
+  - labeling
+  - labelling
+  - rater
+  - reviewer
+  - evaluator
+  - data collection
+  transcription:
+  - transcription
+  - transcriber
+  - asr
+  - speech data
+  - audio annotation
+  workflow_automation:
+  - n8n
+  - make.com
+  - zapier
+  - webhook
+  - whatsapp api
+  - whatsapp business api
+  - api integration
+  - crm automation
+  - workflow automation
+  - process automation
+  - business automation
+  - power platform
+  data_automation:
+  - python
+  - scraping
+  - web scraping
+  - etl
+  - data pipeline
+  - sql
+  - spreadsheet
+  software:
+  - developer
+  - programming
+  - javascript
+  - software
+  - coding
+  - qa
+  - testing
+role_priorities:
+  language_ai: 6
+  ai_evaluation: 5
+  workflow_automation: 5
+  annotation: 4
+  data_automation: 3
+  transcription: 2
+  software: 1
+eligibility:
+  no_anchor_fit_cap: 30
+  domain_aliases:
+    neuroscience:
+    - neuroscience
+    - neurobiology
+    - neurology
+    - neuroimaging
+    - neuroscientist
+    - neurobiologist
+    - neurologist
+    electronics:
+    - electronics
+    - electrical
+    - circuit
+    - analog
+    - analogue
+    - semiconductor
+    - embedded
+    - ngspice
+    - ltspice
+    - pspice
+    - hspice
+    - xspice
+    - spice
+    - pcb
+    - vlsi
+    - verilog
+    - vhdl
+    - fpga
+    - asic
+    - rtl
+    sales_domain:
+    - sales
+    - b2b sales
+    - business development
+    film_television:
+    - film
+    - television
+    - tv
+    - cinema
+    - film production
+    - television production
+    finance_domain:
+    - finance
+    - financial
+    - financial modeling
+    - investment
+    - investment banking
+    - private equity
+    - hedge fund
+    - asset management
+    - valuation
+    physical_sciences:
+    - physical science
+    - physical sciences
+    - physics
+    - chemistry
+    - materials science
+    data:
+    - data
+    - statistics
+    - statistical
+    - spss
+    - research data
+    insurance:
+    - insurance
+    - underwriting
+    - insurance underwriting
+    architecture:
+    - architecture
+    - architectural
+    - architectural design
+    aviation:
+    - aviation
+    - aircraft
+    - aviation maintenance
+    geology:
+    - geology
+    - geological
+    - geoscience
+    legal:
+    - legal
+    - law
+    - legal operations
+  known_languages:
+  - english
+  - bengali
+  - bangla
+  - hindi
+  - german
+  - french
+  - spanish
+  - italian
+  - portuguese
+  - portugese
+  - dutch
+  - flemish
+  - polish
+  - russian
+  - ukrainian
+  - belarusian
+  - czech
+  - slovak
+  - hungarian
+  - romanian
+  - bulgarian
+  - serbian
+  - croatian
+  - bosnian
+  - slovenian
+  - macedonian
+  - albanian
+  - greek
+  - swedish
+  - norwegian
+  - danish
+  - finnish
+  - icelandic
+  - estonian
+  - latvian
+  - lithuanian
+  - maltese
+  - luxembourgish
+  - catalan
+  - basque
+  - galician
+  - welsh
+  - irish
+  - arabic
+  - hebrew
+  - turkish
+  - farsi
+  - persian
+  - dari
+  - pashto
+  - kurdish
+  - urdu
+  - azerbaijani
+  - azeri
+  - kazakh
+  - uzbek
+  - turkmen
+  - kyrgyz
+  - tajik
+  - georgian
+  - armenian
+  - uyghur
+  - mongolian
+  - tamil
+  - telugu
+  - kannada
+  - malayalam
+  - marathi
+  - gujarati
+  - punjabi
+  - odia
+  - assamese
+  - nepali
+  - sinhala
+  - sinhalese
+  - maithili
+  - konkani
+  - sindhi
+  - mandarin
+  - chinese
+  - cantonese
+  - japanese
+  - korean
+  - vietnamese
+  - thai
+  - lao
+  - khmer
+  - burmese
+  - indonesian
+  - malay
+  - javanese
+  - sundanese
+  - tagalog
+  - filipino
+  - cebuano
+  - hmong
+  - maori
+  - hawaiian
+  - swahili
+  - amharic
+  - tigrinya
+  - oromo
+  - somali
+  - yoruba
+  - igbo
+  - hausa
+  - zulu
+  - xhosa
+  - afrikaans
+  - malagasy
+  - haitian creole
+  - kabyle
+  - sepedi
+  - balochi
+  gated_role_patterns:
+    engineering_expert: (chemical|mechanical|civil|electrical|aerospace|aerodynamic|biomedical|nuclear|petroleum|chemistry|materials)\s+(engineer(ing)?|expert|specialist)
+    consultant_pedigree: \bex[- ]?(mbb|mckinsey|bain|bcg|faang)\b
+    clinical_legal: \b(md|mbbs|bds|jd|attorney|lawyer|paralegal|physician|nurse|rn|pharmacist|dentist|veterinarian|radiologist)\b
+    advanced_degree: \b(ph\.?d|postdoc|doctorate)\b
+    finance_licensed: \b(cpa|cfa|actuary|chartered accountant)\b
+    domain_expert_generic: \b(finance|legal|medical|clinical|accounting|tax|biology|physics|chemistry|law)\s+(expert|specialist|tutor|professional)\b
+    subject_matter_expert: \b(medical|clinical|chemistry|biology|physics|mechanical(?:\s+design)?(?:\s*&\s*cad)?|electrical|electronics)\s+(?:subject\s+matter\s+)?(?:expert|specialist|reviewer|tutor)\b
+    sales_domain: \b(?:b2b\s+)?sales\b.{0,40}\b(?:ai\s+training|expert|evaluator|reviewer|trainer|specialist)\b
+    film_television: \b(?:film(?:\s+(?:and|&)\s+television)?|television|tv|cinema)\s+(?:production\s+)?(?:expert|evaluator|reviewer|trainer|specialist)\b
+    finance_domain: \b(?:financial\s+modeling(?:\s+and\s+investment)?|investment|finance)\b.{0,60}\b(?:ai\s+training|expert|evaluator|reviewer|trainer|specialist)\b
+    physical_sciences: \bphysical\s+sciences?\b.{0,60}\b(?:ai\s+(?:training|evaluation)|research\s+assistant|expert|evaluator|reviewer|trainer|specialist)\b
+    neuroscience: \b(neuroscience|neurobiology|neurology|neuroimaging)\s+(expert|specialist|researcher|reviewer|annotator|tutor|professional|consultant)\b|\b(neuroscientist|neurobiologist|neurologist)\b
+    electronics: \b(electronics|electrical|circuit|analog|analogue|semiconductor|embedded)\s+(design|designer|simulation|engineer(ing)?|expert|specialist|reviewer|technician|tutor)\b
+    eda_tools: \b(ngspice|ltspice|pspice|hspice|xspice)\b|\bspice\s+(simulation|simulator|model(ing|ling)?|netlist|circuit|deck)\b
+    hardware_eda: \b(pcb|vlsi|verilog|vhdl|fpga|asic|rtl)\s+(design|designer|engineer(ing)?|expert|specialist|reviewer|layout|verification|validation)\b
+    advanced_research: \b(?:research|applied)\s+(?:scientist|engineer)\b
+    cybersecurity: \b(?:cyber\s*security|cybersecurity|security|cloud infrastructure)\s+(?:engineer|architect|specialist|analyst)\b|\bsecurity\s+engineer\b
+    security_clearance: \b(?:ts/?sci|top secret|active (?:security )?clearance|security clearance|ts required)\b
+    public_health: \b(?:mph|msph)\b|\b(?:master(?:'s)?\s+(?:degree\s+)?in\s+public health|public health)\s+(?:expert|specialist|professional)\b
