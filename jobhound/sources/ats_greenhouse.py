@@ -13,6 +13,7 @@ import httpx
 
 from ..config import CONFIG
 from .base import Source
+from .ats_batch import fetch_boards
 
 _API = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
 
@@ -26,11 +27,8 @@ class GreenhouseSource(Source):
         return cfg.enabled and bool(cfg.greenhouse)
 
     async def _fetch(self, client: httpx.AsyncClient) -> list[dict]:
-        out: list[dict] = []
-        for slug, company in CONFIG.sources.ats.greenhouse.items():
-            resp = await client.get(_API.format(slug=slug), params={"content": "true"})
-            resp.raise_for_status()
-            for job in resp.json().get("jobs", []):
-                job["_slug"], job["_company"] = slug, company
-                out.append(job)
-        return out
+        return await fetch_boards(
+            self, client, CONFIG.sources.ats.greenhouse,
+            api=_API, params={"content": "true"}, items_key="jobs",
+            require_listed=False,
+        )

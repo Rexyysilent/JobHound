@@ -33,6 +33,7 @@ class SourceHealth:
                "deferred": 0, "failed": 0, "skipped": 0}
         for name in ("discovery", "resolution", "hydration", "parsing", "freshness")
     })
+    board_results: list[dict] = field(default_factory=list)
     transport_hosts: list[str] = field(default_factory=list)
     cooldown_until: str | None = None
     last_useful_output_at: str | None = None
@@ -50,6 +51,8 @@ class SourceHealth:
         row["attempted"] += count if outcome not in {"deferred", "skipped"} else 0
         if outcome in row:
             row[outcome] += count
+        if row["failed"] or row["deferred"] or row["skipped"]:
+            row["status"] = "degraded"
 
 
 def summarize_stage_health(health: SourceHealth, *, previous: dict | None = None) -> dict:
@@ -60,9 +63,10 @@ def summarize_stage_health(health: SourceHealth, *, previous: dict | None = None
     prior_resolution = (previous or {}).get("resolution")
     return {
         "overall": "degraded" if degraded else ("ok" if exercised else "unknown"),
-        "remote_http_errors": sum(row["failed"] for row in health.stages.values()),
+        "remote_http_errors": health.failed_requests,
+        "stage_failures": sum(row["failed"] for row in health.stages.values()),
         "skipped_tasks": sum(row["skipped"] for row in health.stages.values()),
-        "resolution_recovered": bool(resolution["attempted"] and resolution["succeeded"] and prior_resolution == "degraded"),
+        "resolution_recovered": bool(resolution["attempted"] and resolution["succeeded"] and not any(resolution[k] for k in ("failed", "deferred", "skipped")) and prior_resolution == "degraded"),
     }
 
 
@@ -107,7 +111,10 @@ class Source(ABC):
         if self.limit is not None:
             items = items[: self.limit]
         self.health.item_count = len(items)
-        self.health.note_stage("discovery", "succeeded")
+        # Batch adapters already recorded each request. Legacy adapters still
+        # receive the prior one-call discovery observation.
+        if not self.health.board_results:
+            self.health.note_stage("discovery", "succeeded")
         if self.health.status == "ok":
             self.health.status = "ok" if items else "empty"
         if self.health.status in {"partial", "failed"}:

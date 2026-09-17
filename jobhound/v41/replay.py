@@ -120,7 +120,12 @@ def load_snapshot(path: Path | str) -> tuple[dict, list[dict]]:
     header = json.loads(lines[0])
     if header.get("type") != "jobhound_snapshot":
         raise ValueError(f"not a JobHound snapshot: {snapshot_path}")
+    if header.get("version") != 1:
+        raise ValueError("unsupported snapshot version")
     records = [json.loads(line) for line in lines[1:]]
+    if not all(isinstance(row, dict) and isinstance(row.get("raw"), dict)
+               and isinstance(row.get("source"), str) for row in records):
+        raise ValueError("invalid snapshot record shape")
     if len(records) != int(header.get("record_count", len(records))):
         raise ValueError("snapshot record count mismatch")
     return header, records
@@ -142,18 +147,28 @@ def replay(path: Path | str) -> RunResult:
     policy = header.get("release_policy")
     previous_policy = CONFIG.v55.model_dump(mode="python")
     if policy:
-        for name, value in policy.items():
-            if name in type(CONFIG.v55).model_fields:
-                setattr(CONFIG.v55, name, value)
+        if not isinstance(policy, dict) or set(policy) - set(type(CONFIG.v55).model_fields):
+            raise ValueError("unsupported snapshot release policy")
+        try:
+            validated_policy = type(CONFIG.v55).model_validate(policy)
+        except (TypeError, ValueError):
+            raise ValueError("invalid snapshot release policy") from None
+        for name, value in validated_policy.model_dump(mode="python").items():
+            setattr(CONFIG.v55, name, value)
     try:
         seed = evaluate_raw(raw, as_of=as_of)
         observations = list(seed.observations)
-        for encoded in [*(header.get("hydration_observations") or []),
-                        *(header.get("account_state_observations") or [])]:
-            try:
-                observations.append(ListingObservation.model_validate(encoded))
-            except (TypeError, ValueError):
-                continue
+        for field in ("hydration_observations", "account_state_observations"):
+            encoded_rows = header.get(field) or []
+            if not isinstance(encoded_rows, list):
+                raise ValueError(f"invalid snapshot {field}")
+            for index, encoded in enumerate(encoded_rows):
+                try:
+                    observations.append(ListingObservation.model_validate(encoded))
+                except (TypeError, ValueError):
+                    # Dropping malformed evidence could remove a known blocker
+                    # and promote a record. Replay must fail closed instead.
+                    raise ValueError(f"invalid snapshot {field} at index {index}") from None
         result = (evaluate_observations(observations, as_of=as_of, raw_count=len(raw))
                   if len(observations) != len(seed.observations) else seed)
     finally:

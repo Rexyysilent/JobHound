@@ -14,6 +14,7 @@ import httpx
 
 from ..config import CONFIG
 from .base import Source
+from .ats_batch import fetch_boards
 
 _API = "https://api.lever.co/v0/postings/{slug}"
 
@@ -27,11 +28,8 @@ class LeverSource(Source):
         return cfg.enabled and bool(cfg.lever)
 
     async def _fetch(self, client: httpx.AsyncClient) -> list[dict]:
-        out: list[dict] = []
-        for slug, company in CONFIG.sources.ats.lever.items():
-            resp = await client.get(_API.format(slug=slug), params={"mode": "json"})
-            resp.raise_for_status()
-            for job in resp.json() or []:
-                job["_slug"], job["_company"] = slug, company
-                out.append(job)
-        return out
+        return await fetch_boards(
+            self, client, CONFIG.sources.ats.lever,
+            api=_API, params={"mode": "json"}, items_key=None,
+            require_listed=False,
+        )

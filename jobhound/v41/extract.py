@@ -249,27 +249,39 @@ def _candidate(
     semantic_raw = re.sub(r"\s*\.\s*-\s*\.\s*", " - ", raw)
     semantic_raw = re.sub(r"\.\s*(Hourly|/\s*(?:hr|hour)|per\s+hour)\b", r" \1", semantic_raw, flags=re.I)
     unit_claim = parse_compensation(semantic_raw)
-    lo, hi, basis, estimated = parse_pay(semantic_raw, CONFIG.pay)
-    precise_units = CONFIG.v55.enabled
-    fixed_amount_usd = None
-    if precise_units and unit_claim.basis == "fixed_project" and unit_claim.amount_low is not None:
-        fixed_amount_usd = round(
-            unit_claim.amount_low * CONFIG.pay.fx_to_usd.get(unit_claim.currency or "USD", 1.0),
-            2,
-        )
-    if lo is None and hi is None and fixed_amount_usd is None:
+    # The deployed V4.2 path must not manufacture labor rates from output units
+    # either. Keep legacy currency-free formats only when no native expression
+    # was recognized at all; recognized ambiguous claims always abstain.
+    precise_units = CONFIG.v55.enabled or unit_claim.amount_low is not None
+    if unit_claim.amount_low is None and unit_claim.warnings != ("no_supported_money_expression",):
         return None
-    non_labor_unit = unit_claim.basis.startswith("output_") or unit_claim.basis in {"fixed_project", "labor_hour_equivalent"}
+    fixed_amount_usd = None
+    if precise_units:
+        # Abstention is terminal for this expression. The legacy parser must not
+        # turn a rejected mixed claim into a fabricated hourly rate.
+        if unit_claim.amount_low is None:
+            return None
+        basis, estimated = unit_claim.basis, unit_claim.labor_equivalent_is_estimate
+        lo = hi = None
+        fx = CONFIG.pay.fx_to_usd.get(unit_claim.currency or "")
+        if fx is not None and fx > 0:
+            if basis == "labor_hour":
+                lo = unit_claim.amount_low * fx
+                hi = unit_claim.amount_high * fx
+            elif basis == "fixed_project":
+                fixed_amount_usd = round(unit_claim.amount_low * fx, 2)
+    else:
+        lo, hi, basis, estimated = parse_pay(semantic_raw, CONFIG.pay)
+        if lo is None and hi is None:
+            return None
+    non_labor_unit = unit_claim.basis != "labor_hour"
     return PayCandidate(
         raw=raw.strip(),
         min_hourly_usd=None if precise_units and non_labor_unit else lo,
         max_hourly_usd=None if precise_units and non_labor_unit else hi,
         fixed_amount_usd=fixed_amount_usd,
-        currency=_currency(raw),
-        basis=(
-            unit_claim.basis
-            if precise_units and unit_claim.basis != "unknown" else basis
-        ),
+        currency=unit_claim.currency if precise_units else _currency(raw),
+        basis="hour" if basis == "labor_hour" and not CONFIG.v55.enabled else basis,
         source_field=source_field,
         observation_id=observation_id,
         confidence=confidence,
@@ -282,6 +294,7 @@ def _candidate(
         qualifier=unit_claim.qualifier or "unknown",
         actual_unit=unit_claim.basis,
         labor_hourly_supported=unit_claim.basis == "labor_hour",
+        selection_reasons=list(unit_claim.warnings),
     )
 
 def _fixed_candidate(
@@ -365,6 +378,7 @@ def _claim_credibility(candidate: PayCandidate) -> float:
 def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate], PayCandidate | None, bool]:
     """Collect candidates from every non-farm observation and select by credibility."""
     candidates: list[PayCandidate] = []
+    invalid_structured_claim = False
     seen: set[tuple] = set()
     has_non_farm = any(
         observation.job is not None
@@ -378,6 +392,10 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
         ):
             continue
         if job.pay_raw:
+            parsed_claim = parse_compensation(job.pay_raw)
+            if (parsed_claim.amount_low is None and parsed_claim.warnings
+                    and parsed_claim.warnings != ("no_supported_money_expression",)):
+                invalid_structured_claim = True
             source_field = "email" if job.source.startswith("email:") else "structured"
             confidence = 0.98 if source_field == "email" else 0.95
             item = _candidate(
@@ -504,16 +522,28 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
         # duplicates here; retain every candidate and source span for inspection.
         return True
 
+    def native_key(candidate):
+        # Equal null hourly projections are not corroboration of output-unit pay.
+        return (candidate.currency, candidate.actual_unit, candidate.amount_low,
+                candidate.amount_high, candidate.qualifier, candidate.scope)
+
     for candidate in candidates:
         candidate.corroborating_observation_ids = sorted({
             other.observation_id
             for other in candidates
             if other.observation_id != candidate.observation_id
             and distinct_source(candidate.observation_id, other.observation_id)
-            and other.basis == candidate.basis
-            and other.min_hourly_usd == candidate.min_hourly_usd
-            and other.max_hourly_usd == candidate.max_hourly_usd
-            and other.fixed_amount_usd == candidate.fixed_amount_usd
+            and (
+                (native_key(other) == native_key(candidate)
+                 and other.amount_low is not None and candidate.amount_low is not None)
+                if (CONFIG.v55.enabled or other.amount_low is not None
+                    or candidate.amount_low is not None) else (
+                    other.basis == candidate.basis
+                    and other.min_hourly_usd == candidate.min_hourly_usd
+                    and other.max_hourly_usd == candidate.max_hourly_usd
+                    and other.fixed_amount_usd == candidate.fixed_amount_usd
+                )
+            )
         })
         candidate.claim_credibility = _claim_credibility(candidate)
     candidates.sort(key=lambda item: (
@@ -526,7 +556,7 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
     selected = candidates[0] if candidates else None
     if selected is not None:
         selected.selection_reasons.append("highest_claim_credibility")
-    conflict = False
+    conflict = invalid_structured_claim
     strong = [candidate for candidate in candidates if candidate.confidence >= 0.65]
     bases = {candidate.basis for candidate in strong}
     if any(value.startswith("fixed") for value in bases) and len(bases) > 1:
@@ -549,6 +579,11 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
             if difference > 0.25:
                 conflict = True
                 break
+    known_native = [c for c in strong if c.amount_low is not None]
+    if len({native_key(c) for c in known_native}) > 1:
+        # Until scope-specific alternatives can be resolved, preserve every
+        # claim but withhold a single trusted compensation conclusion.
+        conflict = True
     return candidates, selected, conflict
 
 
