@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from ..text import normalize_match
 
@@ -41,7 +41,22 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
         path = (split.path or "/").casefold().rstrip("/") or "/"
     except ValueError:
         host, path = "", "/"
-    folded_url = (url or "").casefold().rstrip("/")
+    # A document classification is not proof of a live vacancy or eligibility.
+    if not title.strip() and not text.strip():
+        return DocumentClassification("unknown", "unknown", "unknown", False, ("empty_document",))
+    try:
+        query = parse_qs(split.query)
+    except (UnboundLocalError, ValueError):
+        query = {}
+    individual_query = any(query.get(key) for key in ("gh_jid", "jobId", "job_id", "postingId"))
+    index_path = bool(re.search(r"/(?:jobs|careers|openings)$", path))
+    index_heading = bool(_INDEX.search(title) or re.search(r"\b(?:remote\s+)?(?:ai\s+)?jobs\b", title, re.I))
+    if index_path and not individual_query and (index_heading or _INDEX.search(combined)):
+        return DocumentClassification("job_index", "index", "employer", False, ("multi_job_index",))
+    # Footer recruitment copy and a role's discussion-moderation duties do not
+    # determine the type of the main document. Keep that source text untouched.
+    primary_text = re.split(r"\b(?:not\s+(?:right|ready)\s+for\s+you|not\s+ready\s+to\s+apply|other\s+opportunities)\b|(?:^|[.\n])\s*footer\s*:", text, maxsplit=1, flags=re.I)[0]
+    primary = normalize_match(f"{title}\n{primary_text}")
 
     # Route semantics are stronger than keyword similarity in a search-result
     # snippet.  These are provider-independent page types, with Upwork's
@@ -66,12 +81,11 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
         return DocumentClassification("discussion", "non_opportunity", "discussion", False, ("discussion_route",))
     if _SELLER.search(combined):
         return DocumentClassification("seller_service", "non_opportunity", "seller", False, ("seller_language",))
-    if _POOL.search(combined):
+    if _POOL.search(primary):
         return DocumentClassification("talent_pool", "pool", "employer", False, ("unallocated_pool",))
-    if _DISCUSSION.search(combined) and not _BUYER.search(combined):
+    if _DISCUSSION.search(title) and not _BUYER.search(combined):
         return DocumentClassification("discussion", "non_opportunity", "discussion", False, ("no_paid_demand",))
-    index_url = bool(re.search(r"/(?:jobs|careers|openings)$", folded_url))
-    if _INDEX.search(combined) and index_url:
+    if _INDEX.search(combined) and index_path and not individual_query:
         return DocumentClassification("job_index", "index", "employer", False, ("multi_job_index",))
     if _BUYER.search(combined):
         return DocumentClassification("buyer_request", "individual_request", "buyer", True, ("explicit_buyer_demand",))

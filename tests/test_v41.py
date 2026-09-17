@@ -647,8 +647,11 @@ def test_description_pay_expression_does_not_swallow_401k():
     selected = item.assessment.selected_pay
     assert selected is not None
     assert selected.basis == "year"
-    assert selected.min_hourly_usd == 27.16
-    assert selected.max_hourly_usd == 35.29
+    # Preserve the annual claim without assuming 2,080 hours of labor.
+    assert selected.amount_low == 56500
+    assert selected.amount_high == 73400
+    assert selected.min_hourly_usd is None
+    assert selected.max_hourly_usd is None
     assert "401k" not in selected.raw.casefold()
 
 

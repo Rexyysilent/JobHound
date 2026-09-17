@@ -178,7 +178,7 @@ def _pay_to_job(canonical: CanonicalJob, assessment: Assessment) -> None:
         job.pay_basis = "unknown"
         job.pay_source = "unknown"
         return
-    if selected.basis == "fixed":
+    if selected.basis in {"fixed", "fixed_project"}:
         job.pay_raw = selected.raw
         job.pay_min_hourly_usd = None
         job.pay_max_hourly_usd = None
@@ -225,7 +225,7 @@ def _compensation_credibility(
         return
 
     assessment.pay_credibility = selected.claim_credibility
-    if selected.basis == "fixed" or (CONFIG.v55.enabled and not selected.labor_hourly_supported):
+    if assessment.pay_conflict or selected.basis == "fixed" or not selected.labor_hourly_supported:
         assessment.pay_rate_for_ranking = None
         return
     if CONFIG.v55.enabled:
@@ -240,20 +240,24 @@ def _compensation_credibility(
 
 def _sync_pay_assessment(assessment: Assessment) -> None:
     selected = assessment.selected_pay
-    if selected is None:
-        state = "unknown"
-    elif assessment.pay_conflict:
+    if assessment.pay_conflict:
         state = "conflicted"
+    elif selected is None:
+        state = "unknown"
     elif assessment.economics_band == EconomicsBand.BELOW_FLOOR:
         state = "below_floor"
-    elif selected.basis == "fixed":
-        state = "budget_known"
     elif selected.up_to:
         state = "up_to_only"
-    elif selected.basis == "year":
+    elif assessment.pay_credibility < CONFIG.v41.minimum_economics_credibility:
+        state = "known_unverified"
+    elif selected.basis in {"fixed", "fixed_project"}:
+        state = "budget_known"
+    elif selected.basis in {"year", "month", "week", "day"}:
         state = "credible_salary"
-    elif assessment.pay_credibility >= CONFIG.v41.minimum_economics_credibility:
+    elif selected.labor_hourly_supported and not selected.estimated:
         state = "credible_hourly"
+    elif selected.actual_unit != "unknown":
+        state = "known_credible"
     else:
         state = "known_unverified"
     assessment.pay_assessment = assessment.pay_assessment.model_copy(update={
@@ -464,6 +468,15 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         has_rate=selected is not None,
         company_domain=job.company_domain,
     )
+    # Page type is independent of policy version and hostname reputation.
+    # An original employer directory still is not an individual vacancy.
+    from .documents import classify_offer
+    document = classify_offer(canonical)
+    if document.document_type in {
+        "job_index", "job_index_search", "talent_directory", "seller_service",
+        "discussion", "article",
+    }:
+        quality_reasons.append("non_opportunity:" + document.document_type)
     if canonical.best_observation.source_kind == SourceKind.CONTENT_FARM:
         marker = f"source_kind:{SourceKind.CONTENT_FARM.value}"
         if marker not in quality_reasons:
@@ -521,11 +534,13 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
     if job.company and 0.0 < job.company_confidence < 0.70:
         assessment.unresolved.append("company_identity_uncertain")
 
-    if job.pay_ok is False:
+    if assessment.pay_conflict:
+        assessment.economics_band = EconomicsBand.UNKNOWN
+    elif job.pay_ok is False:
         assessment.economics_band = EconomicsBand.BELOW_FLOOR
     elif selected is None:
         assessment.economics_band = EconomicsBand.UNKNOWN
-    elif selected.basis == "fixed":
+    elif selected.basis in {"fixed", "fixed_project"}:
         assessment.economics_band = (
             EconomicsBand.BUDGET_KNOWN
             if assessment.pay_credibility >= CONFIG.v41.minimum_economics_credibility
@@ -534,7 +549,7 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         )
     elif assessment.pay_credibility < CONFIG.v41.minimum_economics_credibility:
         assessment.economics_band = EconomicsBand.UNKNOWN
-    elif CONFIG.v55.enabled and not selected.labor_hourly_supported:
+    elif not selected.labor_hourly_supported:
         assessment.economics_band = EconomicsBand.UNKNOWN
     elif selected.up_to:
         assessment.economics_band = EconomicsBand.VIABLE

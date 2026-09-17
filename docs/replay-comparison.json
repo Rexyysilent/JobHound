@@ -1,0 +1,222 @@
+{
+  "synthetic": true,
+  "independent_market_validation": false,
+  "comparisons": [
+    {
+      "mode": "v42",
+      "url": "https://jobs.ashbyhq.com/example/labor",
+      "before": {
+        "action": "primary",
+        "unit": "labor_hour",
+        "hourly": 12.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "primary",
+        "unit": "labor_hour",
+        "hourly": 12.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "v42",
+      "url": "https://jobs.ashbyhq.com/example/task",
+      "before": {
+        "action": "primary",
+        "unit": "task_hour",
+        "hourly": 300.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "primary",
+        "unit": "task_hour",
+        "hourly": null,
+        "pay_state": "known_credible",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "v42",
+      "url": "https://jobs.ashbyhq.com/example/monthly",
+      "before": {
+        "action": "reject",
+        "unit": "year",
+        "hourly": 3.32,
+        "pay_state": "below_floor",
+        "conflict": false
+      },
+      "after": {
+        "action": "primary",
+        "unit": "month",
+        "hourly": null,
+        "pay_state": "credible_salary",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "v42",
+      "url": "https://jobs.ashbyhq.com/example/audio",
+      "before": {
+        "action": "primary",
+        "unit": "output_audio_hour",
+        "hourly": 52.8,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "primary",
+        "unit": "output_audio_hour",
+        "hourly": null,
+        "pay_state": "known_credible",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "v42",
+      "url": "https://jobs.ashbyhq.com/example/mixed",
+      "before": {
+        "action": "primary",
+        "unit": "labor_hour",
+        "hourly": 10.8,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "verify",
+        "unit": null,
+        "hourly": null,
+        "pay_state": "conflicted",
+        "conflict": true
+      }
+    },
+    {
+      "mode": "v42",
+      "url": "https://careers.example.org/jobs/",
+      "before": {
+        "action": "primary",
+        "unit": "labor_hour",
+        "hourly": 90.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "reject",
+        "unit": "labor_hour",
+        "hourly": 90.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "review",
+      "url": "https://jobs.ashbyhq.com/example/labor",
+      "before": {
+        "action": "primary",
+        "unit": "labor_hour",
+        "hourly": 12.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "primary",
+        "unit": "labor_hour",
+        "hourly": 12.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "review",
+      "url": "https://jobs.ashbyhq.com/example/monthly",
+      "before": {
+        "action": "primary",
+        "unit": "year",
+        "hourly": 3.32,
+        "pay_state": "credible_salary",
+        "conflict": false
+      },
+      "after": {
+        "action": "primary",
+        "unit": "month",
+        "hourly": null,
+        "pay_state": "credible_salary",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "review",
+      "url": "https://jobs.ashbyhq.com/example/task",
+      "before": {
+        "action": "primary",
+        "unit": "task_hour",
+        "hourly": 300.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "primary",
+        "unit": "task_hour",
+        "hourly": null,
+        "pay_state": "known_credible",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "review",
+      "url": "https://jobs.ashbyhq.com/example/audio",
+      "before": {
+        "action": "primary",
+        "unit": "output_audio_hour",
+        "hourly": null,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "primary",
+        "unit": "output_audio_hour",
+        "hourly": null,
+        "pay_state": "known_credible",
+        "conflict": false
+      }
+    },
+    {
+      "mode": "review",
+      "url": "https://jobs.ashbyhq.com/example/mixed",
+      "before": {
+        "action": "primary",
+        "unit": "labor_hour",
+        "hourly": 10.8,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "verify",
+        "unit": null,
+        "hourly": null,
+        "pay_state": "conflicted",
+        "conflict": true
+      }
+    },
+    {
+      "mode": "review",
+      "url": "https://careers.example.org/jobs/",
+      "before": {
+        "action": "reject",
+        "unit": "labor_hour",
+        "hourly": 90.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      },
+      "after": {
+        "action": "reject",
+        "unit": "labor_hour",
+        "hourly": 90.0,
+        "pay_state": "credible_hourly",
+        "conflict": false
+      }
+    }
+  ]
+}

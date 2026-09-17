@@ -186,7 +186,11 @@ class V41Store:
                     item.assessment.selected_pay.model_dump(mode="json")
                     if item.assessment.selected_pay else None
                 )
-                if old_pay is None and new_pay is not None:
+                if (old_pay is None and new_pay is not None
+                    and not item.assessment.pay_conflict
+                    and item.assessment.pay_credibility >= CONFIG.v41.minimum_economics_credibility
+                    and not item.assessment.selected_pay.estimated
+                    and item.assessment.selected_pay.actual_unit != "unknown"):
                     transition = "pay_resolved"
             item.decision.notification_transition = transition
             if transition != "none":

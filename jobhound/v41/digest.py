@@ -145,6 +145,8 @@ def _pay_line(item: EvaluatedJob) -> str:
     )
     if item.assessment.pay_conflict:
         suffix += " ⚠ conflicting candidates"
+    if not selected.labor_hourly_supported and selected.amount_low is not None:
+        return selected.raw + "; working-hour equivalent unknown" + suffix
     if selected.basis == "fixed":
         amount = selected.fixed_amount_usd
         amount_text = f" (~${amount:g} fixed)" if amount is not None else ""

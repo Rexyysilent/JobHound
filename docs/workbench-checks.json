@@ -1,0 +1,18 @@
+{
+  "checks_passed": 10,
+  "checks": [
+    "empty_state",
+    "synthetic_demo",
+    "band_filter",
+    "search",
+    "untrusted_text_and_url_safe_rendering",
+    "invalid_json_preserves_previous_view",
+    "drag_and_drop",
+    "mobile_no_horizontal_overflow",
+    "clear_memory",
+    "no_script_errors_or_remote_requests"
+  ],
+  "scope": "Chromium desktop/mobile tests of local HTML via set_content; file:// navigation blocked by environment policy; not cross-browser/accessibility certification",
+  "remote_requests": 0,
+  "page_errors": []
+}
