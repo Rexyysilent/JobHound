@@ -2,7 +2,7 @@ name: Apply reviewed uplift (temporary)
 on:
   push:
     branches: ['review/uplift-20260917']
-    paths: ['tools/uplift_payload/**']
+    paths: ['tools/uplift_payload/**', '.github/workflows/apply-reviewed-uplift.yml']
 permissions:
   contents: write
 jobs:
@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.13'
@@ -40,7 +42,8 @@ jobs:
         run: python tools/check_publication.py --index
       - name: Commit and push review branch only
         run: |
-          git config user.name Rexyysilent
-          git config user.email '285245987+Rexyysilent@users.noreply.github.com'
+          # Reuse the public initial release author, not a connector's identity.
+          git config user.name "$(git show -s --format=%an 58bab4df053f60c8edf09d4e7a3d87a72957d18f)"
+          git config user.email "$(git show -s --format=%ae 58bab4df053f60c8edf09d4e7a3d87a72957d18f)"
           git commit -m 'fix: preserve evidence through acquisition, pay and replay' -m 'AI-assisted implementation with offline regression and synthetic replay checks. README and production settings unchanged. Review before merging.'
           git push origin HEAD:refs/heads/review/uplift-20260917
