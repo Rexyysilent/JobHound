@@ -39,7 +39,8 @@ jobs:
           python -m pip freeze > tested-dependencies.txt
       - name: Retain Linux wheels for offline reproduction
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
-        run: python -m pip download --only-binary=:all: -r tested-dependencies.txt --dest wheelhouse
+        run: |
+          python -m pip download --only-binary=:all: -r tested-dependencies.txt --dest wheelhouse
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
