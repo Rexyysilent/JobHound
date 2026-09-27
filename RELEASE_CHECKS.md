@@ -41,17 +41,20 @@ of live job quality.
 ## Verification
 
 - Unit/regression suite with synthetic settings and external network blocked:
-  **1,181 passed, 1 skipped**, in three consecutive full runs. The skip is the
+  **1,191 passed, 1 skipped**, in consecutive full runs. The skip is the
   optional historical live-cache test.
 - `python -m compileall` and `git diff --check`: clean.
 - Acceptance adapter: **100 cases, 0 adapter errors**. Evaluator: **204 of 204
   assertions pass**. The first export draft found two contracts that the v6
   changes had regressed (`DOC-03`, a discussion page classified as a vacancy;
-  `OPS-01`, a rate-limited resolution request missing from the HTTP error
-  count). Both were fixed test-first in the private implementation and
-  re-exported here, together with a related case where real "Discussion
-  Moderator" roles were rejected as discussions. Replays of two production
-  snapshots kept identical decision fingerprints.
+  `OPS-01`, a rate-limited request missing from the HTTP error count). The
+  first fix passed the contracts but an independent code review showed it
+  over-corrected (casual pay words rescued advice threads; broad patterns
+  dropped real roles) and that its HTTP-error change only affected tests.
+  The corrected fix classifies by explicit section headings and advice-style
+  titles, and counts remote HTTP errors where production hydration records
+  them. Every review counter-example is now a test, and replays of two
+  production snapshots keep their original decision fingerprints.
 
 These tests are not a live-market, precision/recall or production-rollout
 certification.

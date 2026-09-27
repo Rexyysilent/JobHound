@@ -32,6 +32,7 @@ from .hydration import (
     RetrievalPolicy,
     StageHealth,
     HydrationResult,
+    is_remote_http_error,
     child_observation,
     hydrate_public_posting,
     resolve_public_original,
@@ -703,10 +704,16 @@ async def hydrate_result(
         adapter_row = adapter_health.setdefault(health_key, {
             "source": health_key[0], "transport_host": health_key[1],
             "stage": "hydration", "attempted": 0, "succeeded": 0,
-            "deferred": 0, "failed": 0,
+            "deferred": 0, "failed": 0, "remote_http_errors": 0, "error_codes": {},
         })
         adapter_row["attempted"] += 1
         health.attempted += 1
+        # A rate-limited request is deferred for retry, but it still reached
+        # the network and failed: count it, and name the code, either way.
+        if is_remote_http_error(outcome.error):
+            health.remote_http_errors += 1
+            adapter_row["remote_http_errors"] += 1
+            adapter_row["error_codes"][outcome.error] = adapter_row["error_codes"].get(outcome.error, 0) + 1
         accepted = (outcome.state in {"complete", "partial"}
                     and outcome.job is not None
                     and outcome.identity_state in {"exact", "corroborated"})
@@ -805,6 +812,7 @@ async def hydrate_result(
         "skipped": health.skipped,
         "request_count": budget.requests,
         "error_codes": health.error_codes,
+        "remote_http_errors": health.remote_http_errors,
     }
     rows = []
     for row in adapter_health.values():

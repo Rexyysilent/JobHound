@@ -33,7 +33,10 @@ def project_retrieval_case(data: dict) -> dict:
         if source_health.get("discovery") == "ok" or source_health.get("current_discovery") == "ok":
             measured.note_stage("discovery", "succeeded")
         for _ in range(int(source_health.get("http_429") or 0)):
+            # Record an HTTP failure the way production adapters do: the stage
+            # event plus the request counter (a parse failure has only the former).
             measured.note_stage("resolution", "failed")
+            measured.failed_requests += 1
         for _ in range(int(source_health.get("circuit_skips") or 0)):
             measured.note_stage("resolution", "skipped")
         output["health"].update(summarize_stage_health(

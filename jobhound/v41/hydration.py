@@ -53,10 +53,26 @@ class StageHealth:
     failed: int = 0
     skipped: int = 0
     error_codes: dict[str, int] = field(default_factory=dict)
+    remote_http_errors: int = 0
 
     def fail(self, code: str) -> None:
         self.failed += 1
         self.error_codes[code] = self.error_codes.get(code, 0) + 1
+
+
+_TRANSPORT_ERRORS = frozenset({
+    "ConnectError", "ConnectTimeout", "ReadError", "ReadTimeout", "WriteError",
+    "WriteTimeout", "PoolTimeout", "TimeoutException", "NetworkError",
+    "RemoteProtocolError", "TransportError",
+})
+
+
+def is_remote_http_error(code: str | None) -> bool:
+    """A request actually reached the network and failed (HTTP 4xx/5xx or a
+    transport error). Cooldowns, budget deferrals, identity or content checks
+    on a successful response are not remote HTTP errors."""
+    code = str(code or "")
+    return bool(re.fullmatch(r"http_[45]\d\d", code)) or code in _TRANSPORT_ERRORS
 
 
 @dataclass

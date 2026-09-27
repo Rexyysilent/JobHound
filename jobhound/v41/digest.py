@@ -271,12 +271,16 @@ def _source_health_alerts(
             errors = health.get("error_codes") or {}
             detail = ", ".join(f"{code}: {count}" for code, count in sorted(errors.items()))
             detail = f"; errors {detail}" if detail else ""
+            http_errors = ""
+            if health.get("remote_http_errors") is not None:
+                count = int(health["remote_http_errors"])
+                http_errors = f"; {count} remote HTTP error{'' if count == 1 else 's'}"
             alerts.append(
                 f"• {label}: {health['stage']} {status or 'unknown'}; "
                 f"{health.get('attempted', 0)} candidates attempted, "
                 f"{health.get('succeeded', 0)} succeeded, "
                 f"{health.get('failed', 0)} failed, "
-                f"{health.get('deferred', 0)} deferred{requests}{detail}. "
+                f"{health.get('deferred', 0)} deferred{requests}{http_errors}{detail}. "
                 "This is not evidence of job closure."
             )
             continue

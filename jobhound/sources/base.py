@@ -61,16 +61,9 @@ def summarize_stage_health(health: SourceHealth, *, previous: dict | None = None
     degraded = any(row["failed"] or row["deferred"] or row["skipped"] for row in exercised)
     resolution = health.stages["resolution"]
     prior_resolution = (previous or {}).get("resolution")
-    # Discovery adapters count their failed HTTP requests in failed_requests
-    # (alongside the stage event). Later network stages record failures only
-    # as stage events. Parsing failures are not remote errors.
-    later_network_failures = sum(
-        health.stages[stage]["failed"] for stage in ("resolution", "hydration", "freshness")
-        if stage in health.stages
-    )
     return {
         "overall": "degraded" if degraded else ("ok" if exercised else "unknown"),
-        "remote_http_errors": health.failed_requests + later_network_failures,
+        "remote_http_errors": health.failed_requests,
         "skipped_tasks": sum(row["skipped"] for row in health.stages.values()),
         "resolution_recovered": bool(resolution["succeeded"] and not (
             resolution["failed"] or resolution["deferred"] or resolution["skipped"]
