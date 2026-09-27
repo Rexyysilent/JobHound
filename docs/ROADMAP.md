@@ -22,6 +22,13 @@ maximize the number of collected listings.
 - "X is necessary" is not yet read as a requirement; only required / must /
   mandatory / minimum are.
 - Verify cards still print a developer "Ordering:" line.
+- Page fetching checks a destination's resolved address before the request
+  but does not pin that address for the connection, so DNS rebinding remains
+  theoretically possible (security review, 2026-09-28). Fix: connect to the
+  checked address.
+- Job text sent to the optional LLM scam check could try to influence its
+  verdict (prompt injection). The check only covers borderline cases and hard
+  filters still apply.
 
 ## Next
 
