@@ -174,6 +174,20 @@ class DeliveryOutbox:
             if not version or version[0] not in {'1', SCHEMA_VERSION}:
                 raise ValueError('unsupported delivery schema')
 
+    def current_revision(self, subject):
+        """The subject's current revision ID, or None if it was never staged."""
+        row = self.conn.execute('SELECT revision FROM delivery_subjects WHERE workspace=? AND profile=? AND subject=?',
+                                (self.workspace, self.profile, subject)).fetchone()
+        return row[0] if row else None
+
+    def _has_table(self, name):
+        """Cached: a table never disappears once created, so only misses re-query."""
+        known = self.__dict__.setdefault('_tables', set())
+        if name not in known and self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone():
+            known.add(name)
+        return name in known
+
     def subject(self, canonical_id):
         identity = identifier(canonical_id)
         alias = self.conn.execute('SELECT subject FROM delivery_aliases WHERE workspace=? AND profile=? AND alias=?',
@@ -198,7 +212,14 @@ class DeliveryOutbox:
                               (self.workspace, self.profile, new_id, subject, evidence))
 
     def register_legacy_crosswalk(self, old_id, new_id, *, evidence):
-        """Move channel-only legacy holds across an exact reviewed identity link."""
+        """Move channel-only legacy holds across an exact reviewed identity link.
+
+        Runs inside every production run's staging transaction, so a link that
+        cannot be applied is skipped (False), never raised: raising rolled back
+        that run and every later one. Skipped cases: the old ID already maps
+        elsewhere, either ID is already an alias, or either ID was already
+        staged (V6 tracks it; a late crosswalk can no longer be applied safely).
+        """
         old_id = identifier(old_id, 'legacy canonical ID')
         new_id = identifier(new_id, 'current canonical ID')
         identifier(evidence, 'crosswalk evidence')
@@ -210,17 +231,15 @@ class DeliveryOutbox:
             (self.workspace, self.profile, old_id),
         ).fetchone()
         if existing:
-            if existing[0] != new_id:
-                raise ValueError('legacy identity already maps elsewhere')
             return False
         if self.subject(old_id) != old_id or self.subject(new_id) != new_id:
-            raise ValueError('ambiguous legacy identity crosswalk')
+            return False
         if self.conn.execute(
             '''SELECT 1 FROM delivery_subjects
                WHERE workspace=? AND profile=? AND subject IN (?,?)''',
             (self.workspace, self.profile, old_id, new_id),
         ).fetchone():
-            raise ValueError('crosswalk must precede subject staging')
+            return False
         legacy = self.conn.execute(
             '''SELECT channel,evidence FROM delivery_legacy
                WHERE workspace=? AND profile=? AND subject=?''',
@@ -293,11 +312,11 @@ class DeliveryOutbox:
                                 (revision, self.workspace, self.profile)).fetchone()
         if not row:
             raise ValueError('revision outside owner')
-        if row['cause'] == 'policy_review':
-            return 'policy_review'
-        current = self.conn.execute('SELECT revision FROM delivery_subjects WHERE workspace=? AND profile=? AND subject=?',
-                                    (self.workspace,self.profile,row['subject'])).fetchone()
-        if current[0] != revision:
+        # A 'policy_review' cause (the material changed while the policy
+        # fingerprint also changed) is recorded for audit, not held: the
+        # fingerprint includes routinely changing trust/config hashes, and a
+        # hold was never released, freezing real updates indefinitely.
+        if self.current_revision(row['subject']) != revision:
             raise ValueError('cannot enqueue stale revision')
         encoded = canonical_json(payload)
         if len(encoded.encode()) > 1_048_576:
@@ -327,18 +346,16 @@ class DeliveryOutbox:
                           (intent,row['attempts'],event,row['token'],evidence,clock(now)))
 
     def _reserved(self, intent):
-        exists = self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='delivery_envelope_items'").fetchone()
-        return bool(exists and self.conn.execute('SELECT 1 FROM delivery_envelope_items WHERE intent=?', (intent,)).fetchone())
+        return bool(self._has_table('delivery_envelope_items') and self.conn.execute('SELECT 1 FROM delivery_envelope_items WHERE intent=?', (intent,)).fetchone())
 
     def _subject_reserved(self, row, *, except_envelope=''):
-        exists = self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='delivery_envelope_items'").fetchone()
-        if not exists:
+        if not self._has_table('delivery_envelope_items'):
             return False
         return bool(self.conn.execute('''SELECT 1 FROM delivery_envelope_items m
             JOIN delivery_envelopes e ON e.id=m.envelope
             JOIN delivery_intents i ON i.id=m.intent JOIN delivery_revisions r ON r.id=i.revision
             WHERE r.workspace=? AND r.profile=? AND r.subject=? AND i.channel=? AND i.destination=?
-            AND e.id!=? AND e.status IN ('pending','leased','uncertain','failed','cancelled')''',
+            AND e.id!=? AND e.status IN ('pending','leased','uncertain')''',
             (self.workspace,self.profile,row['subject'],row['channel'],row['destination'],except_envelope)).fetchone())
 
     def _single_only(self, intent):
@@ -402,21 +419,17 @@ class DeliveryOutbox:
 
     def backfill_rollback_receipts(self):
         """Idempotently mirror accepted intents that predate receipt mirroring."""
-        if not self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='notification_events'").fetchone():
+        if not self._has_table('notification_events'):
             return 0
         with transaction(self.conn):
-            cursor = self.conn.execute(
-                '''INSERT INTO notification_events(run_id, canonical_id, transition, channel, success, ts)
-                   SELECT DISTINCT r.run_id, r.subject, ?, i.channel, 1, ?
+            rows = self.conn.execute(
+                '''SELECT DISTINCT r.run_id, r.subject, i.channel
                    FROM delivery_intents i JOIN delivery_revisions r ON r.id=i.revision
                    WHERE r.workspace=? AND r.profile=? AND i.status='accepted'
-                   AND r.subject NOT LIKE 'coverage:%'
-                   AND NOT EXISTS (SELECT 1 FROM notification_events n
-                       WHERE n.canonical_id=r.subject AND n.channel=i.channel
-                       AND n.run_id=r.run_id AND n.transition=?)''',
-                (V6_RECEIPT_TRANSITION, datetime.now(timezone.utc).isoformat(),
-                 self.workspace, self.profile, V6_RECEIPT_TRANSITION))
-            return cursor.rowcount
+                   AND r.subject NOT LIKE 'coverage:%' ''',
+                (self.workspace, self.profile)).fetchall()
+            return sum(self._write_rollback_receipt(run_id, subject, channel)
+                       for run_id, subject, channel in rows)
 
     def _record_rollback_receipt(self, row):
         """Mirror acceptance into the V4.2 notification history for rollback.
@@ -425,13 +438,31 @@ class DeliveryOutbox:
         """
         if row['subject'].startswith('coverage:'):
             return
-        if not self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='notification_events'").fetchone():
+        if not self._has_table('notification_events'):
             return
         run_id = self.conn.execute('SELECT run_id FROM delivery_revisions WHERE id=?', (row['revision'],)).fetchone()[0]
-        self.conn.execute(
-            'INSERT INTO notification_events(run_id, canonical_id, transition, channel, success, ts) VALUES(?,?,?,?,1,?)',
-            (run_id, row['subject'], V6_RECEIPT_TRANSITION, row['channel'],
-             datetime.now(timezone.utc).isoformat()))
+        self._write_rollback_receipt(run_id, row['subject'], row['channel'])
+
+    def _write_rollback_receipt(self, run_id, subject, channel):
+        """One receipt per job ID, run and channel. A V4.2 rollback looks jobs
+        up by their current canonical ID, which after register_alias() is an
+        alias of the stream, so the stream and every alias get a receipt."""
+        aliases = [row[0] for row in self.conn.execute(
+            'SELECT alias FROM delivery_aliases WHERE workspace=? AND profile=? AND subject=?',
+            (self.workspace, self.profile, subject))]
+        written = 0
+        for canonical_id in (subject, *aliases):
+            if self.conn.execute(
+                    '''SELECT 1 FROM notification_events WHERE run_id=? AND canonical_id=?
+                       AND channel=? AND transition=?''',
+                    (run_id, canonical_id, channel, V6_RECEIPT_TRANSITION)).fetchone():
+                continue
+            self.conn.execute(
+                'INSERT INTO notification_events(run_id, canonical_id, transition, channel, success, ts) VALUES(?,?,?,?,1,?)',
+                (run_id, canonical_id, V6_RECEIPT_TRANSITION, channel,
+                 datetime.now(timezone.utc).isoformat()))
+            written += 1
+        return written
 
     def _settle(self, row, outcome, *, now, evidence):
         if outcome == 'accepted':
@@ -442,8 +473,7 @@ class DeliveryOutbox:
         elif outcome == 'permanent_failure':
             state = 'failed'
         else:
-            current = self.conn.execute('SELECT revision FROM delivery_subjects WHERE workspace=? AND profile=? AND subject=?',
-                                        (self.workspace,self.profile,row['subject'])).fetchone()[0]
+            current = self.current_revision(row['subject'])
             state = 'superseded' if current != row['revision'] else ('failed' if row['attempts'] >= row['max_attempts'] else 'pending')
         self._event(row['id'],outcome,evidence=evidence,now=now)
         self.conn.execute('UPDATE delivery_intents SET status=?,available=?,token=NULL,lease_until=NULL WHERE id=?',
@@ -500,13 +530,16 @@ class DeliveryOutbox:
         Old receipts lack destination and material hashes. Cutover suppresses
         the first current occurrence, records the adopted revision/destination,
         then clears only that subject/channel hold. A later material revision
-        can therefore be delivered normally.
+        can therefore be delivered normally. Holds from an ambiguous URL
+        crosswalk are adopted the same way: still no automatic send, but no
+        permanent hold (nothing ever released them before).
         """
         targets = list(destinations)
         if any(not isinstance(target, Destination) for target in targets):
             raise ValueError('validated destinations required')
         identifier(evidence, 'migration evidence')
         adopted = 0
+        released = set()
         for target in targets:
             rows = self.conn.execute(
                 '''SELECT i.*,r.subject FROM delivery_intents i
@@ -515,8 +548,7 @@ class DeliveryOutbox:
                     AND l.profile=r.profile AND l.subject=r.subject
                     AND l.channel=i.channel
                    WHERE r.workspace=? AND r.profile=? AND i.channel=?
-                   AND i.destination=? AND i.status='legacy_hold'
-                   AND l.evidence!='ambiguous_exact_public_url_crosswalk' ''',
+                   AND i.destination=? AND i.status='legacy_hold' ''',
                 (self.workspace, self.profile, target.channel, target.key),
             ).fetchall()
             for row in rows:
@@ -533,12 +565,16 @@ class DeliveryOutbox:
                     "UPDATE delivery_intents SET status='accepted',token=NULL,lease_until=NULL WHERE id=?",
                     (row['id'],),
                 )
-                self.conn.execute(
-                    '''DELETE FROM delivery_legacy
-                       WHERE workspace=? AND profile=? AND subject=? AND channel=?''',
-                    (self.workspace, self.profile, row['subject'], row['channel']),
-                )
+                released.add((row['subject'], row['channel']))
                 adopted += 1
+        # Clear holds only after every destination on the channel adopted:
+        # deleting per destination left later destinations' intents held forever.
+        for subject, channel in released:
+            self.conn.execute(
+                '''DELETE FROM delivery_legacy
+                   WHERE workspace=? AND profile=? AND subject=? AND channel=?''',
+                (self.workspace, self.profile, subject, channel),
+            )
         return adopted
 
     def inspect(self):
@@ -592,14 +628,15 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                   'already_recorded': 0, 'policy_review': 0, 'selected_cards': 0,
                   'selected_status': 0, 'overflow_cards': 0, 'overflow_status': 0}
         available = []
+        policy_changed = 0          # informational; 'policy_review' counts holds (none now)
         for item in [*active,*statuses]:
             revision = revisions[item.canonical.canonical_id]
             cause = outbox.conn.execute('SELECT cause FROM delivery_revisions WHERE id=?',(revision,)).fetchone()[0]
             exists = outbox.conn.execute('SELECT 1 FROM delivery_intents WHERE revision=? AND channel=? AND destination=?',
                                         (revision,target.channel,target.key)).fetchone()
-            if cause == 'policy_review':
-                counts['policy_review'] += 1
-            elif exists:
+            if cause == 'policy_review' and not exists:
+                policy_changed += 1
+            if exists:
                 counts['already_recorded'] += 1
             else:
                 available.append(item)
@@ -632,7 +669,8 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                 (revision, target.channel, target.key),
             ).fetchone()[0])
         ledgers.append({'channel':target.channel,'destination':target.key,
-                        'counts':counts,'states':states,'intent_ids':intent_ids})
+                        'counts':counts,'states':states,'intent_ids':intent_ids,
+                        'policy_changed':policy_changed})
     # Operational state has a separate capped stream and denominator, not fake jobs.
     health_revisions = []
     seen_scopes = set()
@@ -655,11 +693,8 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
         for revision,payload in health_revisions:
             exists = outbox.conn.execute('SELECT 1 FROM delivery_intents WHERE revision=? AND channel=? AND destination=?',
                                          (revision,target.channel,target.key)).fetchone()
-            cause = outbox.conn.execute('SELECT cause FROM delivery_revisions WHERE id=?',(revision,)).fetchone()[0]
             if exists:
                 coverage['already_recorded'] += 1
-            elif cause == 'policy_review':
-                coverage['policy_review'] += 1
             elif coverage['selected'] >= status_cap:
                 coverage['overflow'] += 1
             else:

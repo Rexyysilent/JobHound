@@ -197,17 +197,6 @@ def _production_context(config, *, root: Path = _REPO_ROOT):
     )
 
 
-def _dispatch_plans(transport, destinations, todays, *, now, limit):
-    """Per-destination send plans; see delivery_transport.plan_dispatch."""
-    from .delivery_transport import plan_dispatch
-    plans = {}
-    for destination in destinations:
-        key = (destination.channel, destination.key)
-        ready = transport.ready_envelopes(destination, now=now, limit=16)
-        plans[key] = plan_dispatch(ready, todays.get(key), limit=limit)
-    return plans
-
-
 def _production_limits(config):
     from .bounded_transport import RequestLimits
     fetch = config.v55.production_fetch
@@ -408,46 +397,20 @@ def _run_v41_scoped(args: argparse.Namespace) -> None:
         return
 
     if durable_delivery:
-        from .delivery_transport import DigestTransport, dispatch_envelope
+        from .delivery_transport import DigestTransport, deliver_destination
         transport = DigestTransport(v41_store.delivery)
         attempted = 0
-        todays = {}
-        for ledger in delivery_report['destinations']:
-            destination = next(
-                target for target in destinations
-                if target.channel == ledger['channel']
-                and target.key == ledger['destination']
-            )
-            pending = [
-                intent_id for intent_id in ledger.get('intent_ids', [])
-                if v41_store.delivery._owned(intent_id)['status'] == 'pending'
-            ]
-            if not pending:
-                continue
-            todays[(destination.channel, destination.key)] = transport.prepare(
-                destination,
-                pending,
-                now=time.time(),
-                summary_run_id=result.metadata.run_id,
-            )
-        # Each destination drains its own safe retries (never uncertain ones)
-        # and always gets today's envelope, so one failing channel's backlog
-        # cannot delay another channel's digest.
-        plans = _dispatch_plans(
-            transport, destinations, todays,
-            now=time.time(), limit=CONFIG.delivery.max_envelopes_per_run,
-        )
+        # Each destination is delivered on its own, so one failing channel's
+        # backlog cannot delay another channel's digest.
         for destination in destinations:
-            for envelope in plans[(destination.channel, destination.key)]:
-                preview = transport.inspect(envelope)
-                outcome = asyncio.run(dispatch_envelope(
-                    transport,
-                    envelope,
-                    delivery_senders[(destination.channel, destination.key)],
-                    confirm_target=preview['destination'],
-                    confirm_body=preview['body_hash'],
-                    max_parts=CONFIG.delivery.max_parts_per_run,
-                ))
+            outcomes = asyncio.run(deliver_destination(
+                transport, destination,
+                delivery_senders[(destination.channel, destination.key)],
+                run_id=result.metadata.run_id,
+                limit=CONFIG.delivery.max_envelopes_per_run,
+                max_parts=CONFIG.delivery.max_parts_per_run,
+            ))
+            for envelope, outcome in outcomes:
                 attempted += 1
                 print(
                     f"{destination.channel.capitalize()} durable delivery: {outcome} "

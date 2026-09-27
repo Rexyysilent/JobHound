@@ -217,7 +217,16 @@ def test_exact_url_crosswalk_quarantines_ambiguous_current_ids(tmp_path):
     )
 
     assert report['legacy_crosswalk'] == {'mapped': 0, 'ambiguous': 1}
-    assert report['legacy_baselines_adopted'] == 0
     assert store.delivery.subject(old_id) == old_id
-    assert {row['status'] for row in store.delivery.inspect()} == {'legacy_hold'}
+    # Still no automatic send for an ambiguous identity (review finding 5):
+    # both current IDs are adopted as already-delivered baselines instead of
+    # being held forever, so a genuine later change is delivered normally.
+    assert report['legacy_baselines_adopted'] == 2
+    assert {row['status'] for row in store.delivery.inspect()} == {'accepted'}
+    assert store.delivery.claim_next(EMAIL, now=101) is None
+    changed = run('Pay USD 30 per hour.', minute=2)
+    changed.evaluated[0].canonical.canonical_id = 'first-current-' + old_id
+    changed.evaluated[0].job.id = changed.evaluated[0].canonical.canonical_id
+    store.record_delivery_run(changed, [EMAIL], now=200, adopt_legacy=True)
+    assert store.delivery.claim_next(EMAIL, now=201) is not None
     store.close()

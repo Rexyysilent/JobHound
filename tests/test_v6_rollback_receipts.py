@@ -73,3 +73,26 @@ def test_v6_receipts_are_not_reimported_as_legacy_holds(store, tmp_path):
     statuses = [store.delivery._owned(i)['status'] for i in changed['destinations'][0]['intent_ids']]
     assert statuses == ['pending']
     assert store.delivery._owned(changed['destinations'][0]['intent_ids'][0])['subject'] == subject
+
+
+def test_rollback_receipt_covers_the_current_id_after_an_alias(store):  # review finding 9
+    first = run('Pay USD 20 per hour.')
+    stage(store, first)
+    finish(store, start(store))
+    old = first.evaluated[0].canonical.canonical_id
+    store.delivery.register_alias(old, 'new-canonical', evidence='reviewed-exact-identity')
+    updated = run('Pay USD 30 per hour.', minute=1)
+    updated.evaluated[0].canonical.canonical_id = 'new-canonical'
+    store.record_delivery_run(updated, (EMAIL,), now=200)
+    finish(store, start(store, now=300), now=301)
+    assert store._was_notified('new-canonical')      # what a V4.2 rollback looks up
+
+
+def test_one_rollback_receipt_per_job_run_and_channel(store):  # review finding 9
+    from jobhound.delivery_outbox import Destination
+    second = Destination.from_address('email', 'test-sender:bob@example.test')
+    stage(store, targets=(EMAIL, second))
+    for destination in (EMAIL, second):
+        finish(store, start(store, destination))
+    assert store.conn.execute(
+        "SELECT count(*) FROM notification_events WHERE transition='v6_durable'").fetchone()[0] == 1

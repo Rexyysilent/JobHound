@@ -198,14 +198,21 @@ def test_uncertain_old_revision_blocks_new_one_until_reconciled(store):
     assert store.delivery.claim_next(EMAIL,now=302) is not None
 
 
-def test_policy_only_change_is_held_not_called_new_fact(store):
+def test_material_change_with_a_policy_change_is_delivered_and_labelled(store):
+    # Review finding 4 (2026-09-28): this used to be held forever. The policy
+    # fingerprint includes the trust-registry and config hashes, which change
+    # routinely, so real updates were being frozen. The revision keeps its
+    # 'policy_review' cause for the audit, but the change is delivered.
     stage(store); claim=start(store); finish(store,claim)
     updated=run('Pay USD 30 per hour.',minute=1)
     updated.metadata.ruleset_hash='new-model'
     report=stage(store,updated)
-    assert report['destinations'][0]['counts']['policy_review']==1
-    assert count(store,'delivery_intents')==1
+    assert report['destinations'][0]['counts']['policy_review']==0     # nothing held
+    assert report['destinations'][0]['policy_changed']==1              # still visible
+    assert count(store,'delivery_intents')==2
     assert count(store,'delivery_revisions')==2
+    assert store.conn.execute("SELECT cause FROM delivery_revisions ORDER BY sequence DESC LIMIT 1").fetchone()[0]=='policy_review'
+    assert store.delivery.claim_next(EMAIL,now=300) is not None
 
 
 def test_canonical_crosswalk_retains_delivered_baseline(store):

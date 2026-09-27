@@ -41,8 +41,17 @@ of live job quality.
 ## Verification
 
 - Unit/regression suite with synthetic settings and external network blocked:
-  **1,191 passed, 1 skipped**, in consecutive full runs. The skip is the
+  **1,200 passed, 1 skipped**, in consecutive full runs. The skip is the
   optional historical live-cache test.
+- Delivery code review: a full review of the outbox, transport and migration
+  modules found ten issues, each reproduced before fixing. Three could stall
+  every later run (a permanently reserved job making staging raise, leases
+  never expiring after a crash, a late legacy crosswalk rolling back each
+  run); others silently held alerts (updates coinciding with a routine
+  policy-fingerprint change, ambiguous legacy matches, later destinations on
+  a channel) or misreported state. All are fixed with regression tests, and a
+  rehearsal on a copy of real delivery history produced no crash and no
+  duplicate sends.
 - `python -m compileall` and `git diff --check`: clean.
 - Acceptance adapter: **100 cases, 0 adapter errors**. Evaluator: **204 of 204
   assertions pass**. The first export draft found two contracts that the v6

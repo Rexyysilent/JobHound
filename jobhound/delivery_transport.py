@@ -48,6 +48,14 @@ CREATE TRIGGER delivery_mapping_no_delete BEFORE DELETE ON delivery_envelope_ite
 """
 
 
+def _telegram_parts(body):
+    """Telegram message parts, with an (i/n) prefix when the body is split.
+    Shared by prepare() and dispatch_envelope()'s frozen-part integrity check."""
+    from .notify.telegram import _chunk
+    chunks = _chunk(body)
+    return [f'({i+1}/{len(chunks)})\n' + chunk for i, chunk in enumerate(chunks)] if len(chunks) > 1 else chunks
+
+
 def plan_dispatch(ready, current, *, limit):
     """Envelopes to attempt for ONE destination this run, oldest first.
 
@@ -133,6 +141,52 @@ class DigestTransport:
         self.conn.execute('''INSERT INTO delivery_part_events(envelope,ordinal,attempt,event,evidence,created)
             VALUES(?,?,?,?,?,?)''', (part['envelope'], part['ordinal'], part['attempts'], event, evidence, clock(now)))
 
+    def _preparable(self, row, destination, now):
+        """The single acceptance rule shared by prepare() and deliverable_intents()."""
+        current = self.box.current_revision(row['subject'])
+        busy = self.conn.execute('''SELECT 1 FROM delivery_intents i JOIN delivery_revisions r ON r.id=i.revision
+            WHERE r.workspace=? AND r.profile=? AND r.subject=? AND i.channel=? AND i.destination=?
+            AND i.status IN ('leased','sending','uncertain','legacy_hold')''',
+            (self.box.workspace, self.box.profile, row['subject'], destination.channel, destination.key)).fetchone()
+        return not (row['channel'] != destination.channel or row['destination'] != destination.key
+                    or row['status'] != 'pending' or row['revision'] != current
+                    or row['available'] > clock(now) or busy or self.box._subject_reserved(row)
+                    or self.conn.execute('SELECT 1 FROM delivery_envelope_items WHERE intent=?', (row['id'],)).fetchone())
+
+    def deliverable_intents(self, destination, *, now, limit=100):
+        """Pending intents prepare() would accept, oldest first, from any run.
+
+        Selecting from the store (not only this run's report) means intents
+        left over by a cap or a temporarily reserved job are sent later
+        instead of dropping out of every later ledger.
+        """
+        if not isinstance(destination, Destination):
+            raise ValueError('validated destination required')
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError('intent limit must be 1..100')
+        now = clock(now)
+        ready = []
+        for (intent_id,) in self.conn.execute(
+                '''SELECT i.id FROM delivery_intents i JOIN delivery_revisions r ON r.id=i.revision
+                   WHERE r.workspace=? AND r.profile=? AND i.channel=? AND i.destination=?
+                   AND i.status='pending' ORDER BY i.id''',
+                (self.box.workspace, self.box.profile, destination.channel, destination.key)).fetchall():
+            if self._preparable(self.box._owned(intent_id), destination, now):
+                ready.append(intent_id)
+                if len(ready) == limit:
+                    break
+        return ready
+
+    def expire_leases(self, destination, *, now):
+        """Expire leases a crashed run left behind; claim() only expires its own."""
+        now = clock(now)
+        with transaction(self.conn):
+            for (envelope,) in self.conn.execute(
+                    '''SELECT id FROM delivery_envelopes WHERE workspace=? AND profile=?
+                       AND channel=? AND destination=? AND status='leased' AND lease_until<=?''',
+                    (self.box.workspace, self.box.profile, destination.channel, destination.key, now)).fetchall():
+                self._expire(envelope, now)
+
     def prepare(self, destination, intent_ids, *, now, summary_run_id=None):
         """Exact reviewed intent IDs only. No implicit draining of older pending mail."""
         ids = list(intent_ids)
@@ -142,16 +196,7 @@ class DigestTransport:
         with transaction(self.conn):
             rows = [self.box._owned(i) for i in ids]
             for row in rows:
-                current = self.conn.execute('SELECT revision FROM delivery_subjects WHERE workspace=? AND profile=? AND subject=?',
-                    (self.box.workspace, self.box.profile, row['subject'])).fetchone()[0]
-                busy = self.conn.execute('''SELECT 1 FROM delivery_intents i JOIN delivery_revisions r ON r.id=i.revision
-                    WHERE r.workspace=? AND r.profile=? AND r.subject=? AND i.channel=? AND i.destination=?
-                    AND i.status IN ('leased','sending','uncertain','legacy_hold')''',
-                    (self.box.workspace, self.box.profile, row['subject'], destination.channel, destination.key)).fetchone()
-                if (row['channel'] != destination.channel or row['destination'] != destination.key
-                        or row['status'] != 'pending' or row['revision'] != current
-                        or row['available'] > clock(now) or busy or self.box._subject_reserved(row)
-                        or self.conn.execute('SELECT 1 FROM delivery_envelope_items WHERE intent=?', (row['id'],)).fetchone()):
+                if not self._preparable(row, destination, now):
                     raise ValueError('intent is stale, held, reserved, unavailable, or has a different destination')
             body = render_envelope(rows)
             if summary_run_id is not None:
@@ -178,9 +223,7 @@ class DigestTransport:
             if len(body.encode()) > 128 * 1024:
                 raise ValueError('digest exceeds 128 KiB; select fewer intents')
             if destination.channel == 'telegram':
-                from .notify.telegram import _chunk
-                chunks = _chunk(body)
-                parts = [f'({i+1}/{len(chunks)})\n' + chunk for i, chunk in enumerate(chunks)] if len(chunks) > 1 else chunks
+                parts = _telegram_parts(body)
             elif destination.channel == 'email':
                 parts = [body]
             else:
@@ -229,6 +272,10 @@ class DigestTransport:
 
     def _set_intents(self, envelope, status, *, now):
         for item in self._items(envelope):
+            # A newer revision superseded it (or it was already delivered):
+            # an envelope's lease/abandon state must not make it look live.
+            if item['status'] in {'superseded', 'accepted'}:
+                continue
             self.box._event(item['id'], 'envelope_' + status, evidence=envelope, now=now)
             self.conn.execute('UPDATE delivery_intents SET status=?,token=NULL,lease_until=NULL WHERE id=?',
                               (status, item['id']))
@@ -248,9 +295,7 @@ class DigestTransport:
             self._set_intents(envelope, status, now=now)
 
     def _current(self, envelope):
-        return all(item['revision'] == self.conn.execute(
-            'SELECT revision FROM delivery_subjects WHERE workspace=? AND profile=? AND subject=?',
-            (self.box.workspace, self.box.profile, item['subject'])).fetchone()[0] for item in self._items(envelope))
+        return all(item['revision'] == self.box.current_revision(item['subject']) for item in self._items(envelope))
 
     def _stale(self, envelope, now):
         if self._current(envelope):
@@ -262,8 +307,7 @@ class DigestTransport:
             self._set_intents(envelope, 'uncertain', now=now)
         else:
             for item in self._items(envelope):
-                current = self.conn.execute('SELECT revision FROM delivery_subjects WHERE workspace=? AND profile=? AND subject=?',
-                    (self.box.workspace,self.box.profile,item['subject'])).fetchone()[0]
+                current = self.box.current_revision(item['subject'])
                 state = 'pending' if item['revision'] == current else 'superseded'
                 self.conn.execute('UPDATE delivery_intents SET status=?,token=NULL,lease_until=NULL WHERE id=?', (state,item['id']))
                 self.box._event(item['id'], 'envelope_cancelled', evidence=envelope, now=now)
@@ -408,8 +452,7 @@ class DigestTransport:
                 raise ValueError('selected intent is outside the reviewed drafts')
             rows = [self.box._owned(i) for i in ids]
             for row in rows:
-                current = self.conn.execute('SELECT revision FROM delivery_subjects WHERE workspace=? AND profile=? AND subject=?',
-                    (self.box.workspace,self.box.profile,row['subject'])).fetchone()[0]
+                current = self.box.current_revision(row['subject'])
                 latest = self.conn.execute('SELECT id FROM delivery_intents WHERE revision=? AND channel=? AND destination=? ORDER BY generation DESC LIMIT 1',
                     (row['revision'],row['channel'],row['destination'])).fetchone()[0]
                 sent = self.conn.execute("SELECT 1 FROM delivery_attempt_events WHERE intent=? AND (attempt>0 OR event IN ('send_started','accepted','uncertain','not_sent','permanent_failure'))", (row['id'],)).fetchone()
@@ -454,9 +497,7 @@ async def dispatch_envelope(transport, envelope, notifier, *, confirm_target, co
         raise ValueError('frozen envelope integrity failure')
     expected = [initial['body']]
     if initial['channel'] == 'telegram':
-        from .notify.telegram import _chunk
-        chunks = _chunk(initial['body'])
-        expected = [f'({i+1}/{len(chunks)})\n'+p for i,p in enumerate(chunks)] if len(chunks)>1 else chunks
+        expected = _telegram_parts(initial['body'])
     if [p['body'] for p in initial['parts']] != expected:
         raise ValueError('frozen part integrity failure')
     for _ in range(max_parts):
@@ -478,3 +519,33 @@ async def dispatch_envelope(transport, envelope, notifier, *, confirm_target, co
         if receipt.outcome != 'accepted':
             break
     return transport.inspect(envelope)['status']
+
+
+async def deliver_destination(transport, destination, sender, *, run_id, now=time.time,
+                              limit=4, max_parts=32, max_intents=100):
+    """One run's delivery for ONE destination; returns envelope outcomes.
+
+    Order matters: expire leases a crashed run left behind, then settle due
+    retries (claim() cancels stale ones, which releases their jobs), then
+    prepare every deliverable intent (from any run, never a reserved job) into
+    today's envelope. Planning per destination keeps one failing channel from
+    delaying another; plan_dispatch keeps a slot for today's envelope.
+    """
+    async def send(envelope):
+        preview = transport.inspect(envelope)
+        return await dispatch_envelope(
+            transport, envelope, sender,
+            confirm_target=preview['destination'], confirm_body=preview['body_hash'],
+            max_parts=max_parts, now=now,
+        )
+
+    transport.expire_leases(destination, now=now())
+    outcomes = []
+    retries = transport.ready_envelopes(destination, now=now(), limit=16)
+    for envelope in plan_dispatch(retries, None, limit=max(0, limit - 1)):
+        outcomes.append((envelope, await send(envelope)))
+    intents = transport.deliverable_intents(destination, now=now(), limit=max_intents)
+    if intents:
+        envelope = transport.prepare(destination, intents, now=now(), summary_run_id=run_id)
+        outcomes.append((envelope, await send(envelope)))
+    return outcomes
