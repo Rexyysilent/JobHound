@@ -17,11 +17,6 @@ maximize the number of collected listings.
 
 ## Known issues
 
-- Two v5.5 acceptance contracts regressed with the v6 changes and are tracked
-  openly (see [release checks](../RELEASE_CHECKS.md)): a discussion page with an
-  ATS source is classified as a vacancy (DOC-03), and a single failed request
-  followed by circuit-breaker skips is reported with zero remote HTTP errors
-  (OPS-01).
 - Some listing pages and freelancer profiles still reach Verify instead of
   being rejected.
 - "X is necessary" is not yet read as a requirement; only required / must /
@@ -30,15 +25,14 @@ maximize the number of collected listings.
 
 ## Next
 
-1. Fix the two contract regressions with failing tests first.
-2. Community buyer-thread adapters for public Discourse hiring categories (Make
+1. Community buyer-thread adapters for public Discourse hiring categories (Make
    community Hire Help, n8n community Jobs): the original poster is the buyer,
    replies are mostly sellers, closure markers end the lead, reads are paced
    and a 429 is recorded as missing coverage.
-3. Exact-role adapters for contractor platforms with explicit identity and
+2. Exact-role adapters for contractor platforms with explicit identity and
    completeness checks; a JavaScript shell never counts as complete evidence.
-4. A compact-audit CLI export for the workbench.
-5. Onboarding: profile wizard, `doctor`, backup/restore.
+3. A compact-audit CLI export for the workbench.
+4. Onboarding: profile wizard, `doctor`, backup/restore.
 
 ## Branchable ideas
 

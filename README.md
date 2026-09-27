@@ -144,8 +144,8 @@ LLM calls and delivery are all off in the starter config.
 
 This repo contains the code, synthetic tests and demo inputs, not my private
 configuration, job history, outcomes or credentials. See
-[release checks](RELEASE_CHECKS.md) for what has been verified (including two
-known contract regressions) and [publication notes](PUBLICATION.md) for the
+[release checks](RELEASE_CHECKS.md) for what has been verified and
+[publication notes](PUBLICATION.md) for the
 sharing boundary. Plans and known gaps are in the [roadmap](docs/ROADMAP.md);
 contribution guidelines are in [CONTRIBUTING](CONTRIBUTING.md).
 

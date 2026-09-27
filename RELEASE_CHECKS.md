@@ -41,17 +41,17 @@ of live job quality.
 ## Verification
 
 - Unit/regression suite with synthetic settings and external network blocked:
-  **1,167 passed, 1 skipped**, in six consecutive full runs. The skip is the
+  **1,181 passed, 1 skipped**, in three consecutive full runs. The skip is the
   optional historical live-cache test.
 - `python -m compileall` and `git diff --check`: clean.
-- Acceptance adapter: **100 cases, 0 adapter errors**. Evaluator: **201 of 204
-  assertions pass**. The same three fail on the private implementation, so they
-  are real regressions carried by the current code, not export artifacts:
-  - `DOC-03` (two assertions): a discussion/advice page with an ATS source kind
-    is classified as an individual vacancy and allowed as a daily action.
-  - `OPS-01`: one failed request followed by circuit-breaker skips reports zero
-    remote HTTP errors instead of one.
-  Both are listed in the [roadmap](docs/ROADMAP.md) for a test-first fix.
+- Acceptance adapter: **100 cases, 0 adapter errors**. Evaluator: **204 of 204
+  assertions pass**. The first export draft found two contracts that the v6
+  changes had regressed (`DOC-03`, a discussion page classified as a vacancy;
+  `OPS-01`, a rate-limited resolution request missing from the HTTP error
+  count). Both were fixed test-first in the private implementation and
+  re-exported here, together with a related case where real "Discussion
+  Moderator" roles were rejected as discussions. Replays of two production
+  snapshots kept identical decision fingerprints.
 
 These tests are not a live-market, precision/recall or production-rollout
 certification.

@@ -30,6 +30,33 @@ _RECRUITMENT = re.compile(
     re.I,
 )
 _DISCUSSION = re.compile(r"\b(?:how\s+(?:do|can)\s+i|get(?:ting)?\s+(?:a\s+)?job|career\s+advice|discussion|anyone\s+know)\b", re.I)
+_ADVICE_TITLE = re.compile(
+    r"\b(?:how\s+(?:do|can|did|does|should)\s+(?:i|you|we|people|anyone|one)\b"
+    r"|where\s+(?:can|do|should)\s+(?:i|you|we|people)\s+(?:find|get|look)\b"
+    r"|is\s+.{1,60}?\s+(?:legit|legitimate|a\s+scam|worth\s+it)\b"
+    r"|anyone\s+(?:else\s+)?(?:know|tried|using|working)\b"
+    r"|(?:tips|advice)\s+(?:for|on|needed)\b)",
+    re.I,
+)
+# What an actual role or buyer page states. Its presence means a discussion
+# word (a moderation duty, a "Discussion Moderator" title) describes the work,
+# not the page type.
+_ROLE_STRUCTURE = re.compile(
+    r"\b(?:requirements?|responsibilit(?:y|ies)|qualifications?|what\s+you(?:'ll|\s+will)\s+do"
+    r"|how\s+to\s+apply|apply\s+(?:now|here|today|through|via|for\s+(?:this|the|job))"
+    r"|compensation|salary|pay\s*(?::|rate|range)|per\s+hour|hourly\s+rate"
+    r"|job\s+description|we\s+are\s+hiring|we're\s+hiring)\b",
+    re.I,
+)
+# A body only marks a discussion when it describes itself as one. The bare
+# word "discussion" is ordinary in postings ("discussion channels", "a good
+# discussion on technical design", "case and discussion" interview steps).
+_DISCUSSION_BODY = re.compile(
+    r"\b(?:discussion\s+(?:thread|and\s+advice|post|topic|forum\s+post)|general\s+discussion"
+    r"|advice\s+(?:thread|wanted|needed)|share\s+(?:your\s+experiences?|what\s+worked)"
+    r"|no\s+buyer\s+request|not\s+a\s+job\s+(?:post|posting|offer|listing))\b",
+    re.I,
+)
 _POOL = re.compile(r"\b(?:talent\s+(?:network|community|pool)|join\s+our\s+network|future\s+opportunities|waitlist|expression\s+of\s+interest)\b", re.I)
 
 
@@ -83,7 +110,9 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
         return DocumentClassification("seller_service", "non_opportunity", "seller", False, ("seller_language",))
     if _POOL.search(primary):
         return DocumentClassification("talent_pool", "pool", "employer", False, ("unallocated_pool",))
-    if _DISCUSSION.search(title) and not _BUYER.search(combined):
+    discussion_signal = (_DISCUSSION.search(title) or _ADVICE_TITLE.search(title)
+                         or _DISCUSSION_BODY.search(primary_text))
+    if discussion_signal and not _ROLE_STRUCTURE.search(primary) and not _BUYER.search(combined):
         return DocumentClassification("discussion", "non_opportunity", "discussion", False, ("no_paid_demand",))
     if _INDEX.search(combined) and index_path and not individual_query:
         return DocumentClassification("job_index", "index", "employer", False, ("multi_job_index",))
