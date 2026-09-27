@@ -127,12 +127,21 @@ class Profile:
 
 
 @lru_cache(maxsize=1)
-def default_profile() -> Profile:
+def _default_profile() -> Profile:
     path = _PROFILE_PATH
     if not path.exists():
         path = path.with_name("profile.example.yaml")
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return Profile.from_config(data)
+
+
+def default_profile() -> Profile:
+    from ..run_context import current_run
+    context = current_run()
+    return context.profile() if context else _default_profile()
+
+
+default_profile.cache_clear = _default_profile.cache_clear
 
 
 # --- language gate -----------------------------------------------------------

@@ -139,7 +139,9 @@ def _combined_hash(paths: list[Path]) -> str:
 
 
 def _metadata(as_of: datetime | None = None) -> RunMetadata:
-    now = as_of or datetime.now(timezone.utc)
+    from ..run_context import current_run
+    context = current_run()
+    now = as_of or (context.as_of if context else datetime.now(timezone.utc))
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     v41_dir = Path(__file__).resolve().parent
@@ -156,11 +158,16 @@ def _metadata(as_of: datetime | None = None) -> RunMetadata:
         # to a file-only hash. No environment variables or credentials are read.
         config_hash = hashlib.sha256(json.dumps(CONFIG.model_dump(mode='json'), sort_keys=True, default=str).encode('utf-8')).hexdigest()[:16]
     run_seed = f"{now.isoformat()}|{ruleset_hash}|{profile_hash}|{config_hash}"
+    if context:
+        profile_hash = hashlib.sha256(context.profile_json.encode()).hexdigest()[:16]
+        trust_hash = hashlib.sha256(context.registry_json.encode()).hexdigest()[:16]
+        config_hash = hashlib.sha256(context.config_json.encode()).hexdigest()[:16]
+        run_seed = context.run_id + context.fingerprint() + ruleset_hash
     run_id = hashlib.sha256(run_seed.encode("utf-8")).hexdigest()[:20]
     return RunMetadata(
         engine_version="v5.0.0-rc1" if CONFIG.v55.enabled else ENGINE_VERSION,
         run_id=run_id,
-        started_at=datetime.now(timezone.utc),
+        started_at=context.as_of if context else datetime.now(timezone.utc),
         as_of=now,
         ruleset_hash=ruleset_hash,
         profile_hash=profile_hash,
@@ -192,7 +199,8 @@ def _pay_to_job(canonical: CanonicalJob, assessment: Assessment) -> None:
     job.pay_basis = selected.basis
     job.pay_is_estimate = selected.estimated
     job.pay_source = selected.source_field
-    job.guaranteed_hours = selected.guaranteed
+    if not CONFIG.v55.enabled:
+        job.guaranteed_hours = selected.guaranteed
 
 
 def _trust(assessment: Assessment, canonical: CanonicalJob) -> None:
@@ -246,12 +254,18 @@ def _sync_pay_assessment(assessment: Assessment) -> None:
         state = "conflicted"
     elif assessment.economics_band == EconomicsBand.BELOW_FLOOR:
         state = "below_floor"
+    elif CONFIG.v55.enabled and selected.actual_unit == "unknown":
+        state = "unknown"
+    elif CONFIG.v55.enabled and assessment.pay_credibility < CONFIG.v41.minimum_economics_credibility:
+        state = "known_unverified"
     elif selected.basis == "fixed":
         state = "budget_known"
     elif selected.up_to:
         state = "up_to_only"
-    elif selected.basis == "year":
+    elif selected.basis in ({"year", "month", "week", "day"} if CONFIG.v55.enabled else {"year"}):
         state = "credible_salary"
+    elif CONFIG.v55.enabled and not selected.labor_hourly_supported:
+        state = "known_unverified"
     elif assessment.pay_credibility >= CONFIG.v41.minimum_economics_credibility:
         state = "credible_hourly"
     else:
@@ -423,7 +437,8 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
             job.description,
             title=job.title,
         ),
-        *region_lock_check(job.title, f"{job.location or ''}\n{job.description}"),
+        *region_lock_check(job.title, f"{job.location or ''}\n{job.description}",
+                           polarity_aware=CONFIG.v55.enabled),
         *location_mismatches(requirements_assessment),
     ]
     if CONFIG.v55.enabled:

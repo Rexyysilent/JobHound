@@ -14,6 +14,7 @@ keys/
 
 # Runtime/research data, replay captures, logs and archives
 data/
+runtime/
 roadmap/
 private/
 review/

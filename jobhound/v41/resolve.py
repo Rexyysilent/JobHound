@@ -32,6 +32,7 @@ from .hydration import (
     RetrievalPolicy,
     StageHealth,
     HydrationResult,
+    is_remote_http_error,
     child_observation,
     hydrate_public_posting,
     resolve_public_original,
@@ -608,6 +609,9 @@ async def hydrate_result(
         )
     health = StageHealth("hydration")
     budget = RetrievalBudget(policy, review_namespace=review_namespace)
+    from ..bounded_transport import BoundedTransport
+    shared_owner = transport.budget if isinstance(transport, BoundedTransport) else None
+    requests_before = shared_owner.receipt()['requests_reserved'] if shared_owner else 0
     as_of_ts = result.metadata.as_of.timestamp()
     max_cycles = getattr(getattr(CONFIG, "v55", None), "max_automatic_cycles", 2)
     watch_days = getattr(getattr(CONFIG, "v55", None), "watch_recheck_days", 7)
@@ -700,10 +704,16 @@ async def hydrate_result(
         adapter_row = adapter_health.setdefault(health_key, {
             "source": health_key[0], "transport_host": health_key[1],
             "stage": "hydration", "attempted": 0, "succeeded": 0,
-            "deferred": 0, "failed": 0,
+            "deferred": 0, "failed": 0, "remote_http_errors": 0, "error_codes": {},
         })
         adapter_row["attempted"] += 1
         health.attempted += 1
+        # A rate-limited request is deferred for retry, but it still reached
+        # the network and failed: count it, and name the code, either way.
+        if is_remote_http_error(outcome.error):
+            health.remote_http_errors += 1
+            adapter_row["remote_http_errors"] += 1
+            adapter_row["error_codes"][outcome.error] = adapter_row["error_codes"].get(outcome.error, 0) + 1
         accepted = (outcome.state in {"complete", "partial"}
                     and outcome.job is not None
                     and outcome.identity_state in {"exact", "corroborated"})
@@ -788,6 +798,8 @@ async def hydrate_result(
         result.accounting_ok = rebuilt.accounting_ok
         result.accounting_errors = rebuilt.accounting_errors
         result.source_health = old_health
+    if shared_owner:
+        budget.requests = shared_owner.receipt()['requests_reserved'] - requests_before
     stage = {
         "source": "retrieval",
         "transport_host": "multiple",
@@ -800,6 +812,7 @@ async def hydrate_result(
         "skipped": health.skipped,
         "request_count": budget.requests,
         "error_codes": health.error_codes,
+        "remote_http_errors": health.remote_http_errors,
     }
     rows = []
     for row in adapter_health.values():

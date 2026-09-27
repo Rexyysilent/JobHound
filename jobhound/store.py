@@ -70,6 +70,8 @@ _V2_COLUMNS = {
 
 class Store:
     def __init__(self, db_path: Path | str | None = None):
+        from .run_context import deny_review_side_effect
+        deny_review_side_effect('legacy store access')
         self.db_path = Path(db_path) if db_path else _DEFAULT_DB
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)

@@ -4,14 +4,17 @@ Included: current Python implementation, portable launcher, requirements,
 blank/neutral configuration examples, synthetic regression tests and executable
 acceptance contracts. All source files are inspectable text.
 
-Excluded: Git history and identity metadata; real credentials; personal config
-and profile; signup and application states; trust-feedback events; private
-handoffs; roadmap archives; live captures; cached HTML; email digests; database
-rows; screenshots; notebooks; build output and virtual environments.
+Excluded: the private repository's Git history and identity metadata; real
+credentials; personal config and profile; signup, application and outcome
+states; delivery ledgers; trust-feedback events; private handoffs; roadmap
+archives; live captures and production-derived fixtures; cached HTML; email
+digests; database rows; runtime request ledgers; screenshots; notebooks; build
+output and virtual environments.
 
-The source export deliberately has no Git repository. Initialize new history
-here only after reviewing the release and your author identity. Never push the
-original private history on the assumption that sanitized current files erase it.
+This public repository has its own history. Each export is a new commit built
+from an explicit file selection of the current private implementation; the
+private history is never pushed or merged. Never assume that sanitized current
+files erase anything already present in older history.
 
 ## Verification expectations
 
@@ -27,7 +30,7 @@ Run the included checker from this directory:
 
 ```powershell
 python tools/check_publication.py
-# After initializing a NEW repository and staging reviewed files:
+# After staging the reviewed files:
 python tools/check_publication.py --index
 ```
 

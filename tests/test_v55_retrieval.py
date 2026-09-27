@@ -201,7 +201,7 @@ def test_live_review_capture_is_scoped_and_excludes_imap(tmp_path, monkeypatch):
     seen = {}
     raw = [{"source": "greenhouse", "raw": {"id": 1, "title": "Reviewer", "_company": "Acme",
             "absolute_url": "https://boards.greenhouse.io/acme/jobs/1", "content": "Review AI output."}}]
-    async def fake_ingest(*, limit, only, transport, exclude):
+    async def fake_ingest(*, limit, only, transport, exclude, on_batch=None):
         seen["exclude"] = exclude; seen["enabled"] = CONFIG.v55.enabled
         return raw, []
     async def fake_hydrate(result, **kwargs):
@@ -210,7 +210,7 @@ def test_live_review_capture_is_scoped_and_excludes_imap(tmp_path, monkeypatch):
     monkeypatch.setattr(review, "ingest_raw_with_health", fake_ingest)
     monkeypatch.setattr(review, "hydrate_result", fake_hydrate)
     previous = CONFIG.v55.enabled
-    snapshot, digest = asyncio.run(review.capture_review(tmp_path / "isolated"))
+    snapshot, digest = asyncio.run(review.capture_review(tmp_path / "isolated", transport=httpx.MockTransport(lambda r: httpx.Response(500))))
     assert snapshot.exists() and digest.exists()
     assert (tmp_path / "isolated" / "audit.json").exists()
     assert seen["enabled"] is True and CONFIG.v55.enabled is previous

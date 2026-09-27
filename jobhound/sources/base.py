@@ -36,6 +36,8 @@ class SourceHealth:
     transport_hosts: list[str] = field(default_factory=list)
     cooldown_until: str | None = None
     last_useful_output_at: str | None = None
+    board_results: list[dict] = field(default_factory=list)
+    query_results: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -44,12 +46,13 @@ class SourceHealth:
         if stage not in self.stages:
             raise ValueError(f"unknown source stage: {stage}")
         row = self.stages[stage]
-        row["status"] = "ok" if outcome == "succeeded" else (
-            "degraded" if outcome in {"failed", "deferred", "skipped"} else outcome
-        )
         row["attempted"] += count if outcome not in {"deferred", "skipped"} else 0
         if outcome in row:
             row[outcome] += count
+        row["status"] = (
+            "degraded" if row["failed"] or row["deferred"] or row["skipped"]
+            else "ok" if row["succeeded"] else "unknown"
+        )
 
 
 def summarize_stage_health(health: SourceHealth, *, previous: dict | None = None) -> dict:
@@ -60,9 +63,11 @@ def summarize_stage_health(health: SourceHealth, *, previous: dict | None = None
     prior_resolution = (previous or {}).get("resolution")
     return {
         "overall": "degraded" if degraded else ("ok" if exercised else "unknown"),
-        "remote_http_errors": sum(row["failed"] for row in health.stages.values()),
+        "remote_http_errors": health.failed_requests,
         "skipped_tasks": sum(row["skipped"] for row in health.stages.values()),
-        "resolution_recovered": bool(resolution["attempted"] and resolution["succeeded"] and prior_resolution == "degraded"),
+        "resolution_recovered": bool(resolution["succeeded"] and not (
+            resolution["failed"] or resolution["deferred"] or resolution["skipped"]
+        ) and prior_resolution == "degraded"),
     }
 
 
@@ -83,6 +88,10 @@ class Source(ABC):
         """Return provider-native dicts. Raise freely — `fetch` handles it."""
 
     async def fetch(self, client: httpx.AsyncClient) -> list[RawRecord]:
+        from ..run_context import current_run
+        from ..bounded_transport import BoundedTransport
+        if current_run() and not isinstance(client._transport, BoundedTransport):
+            raise ValueError('scoped source fetch requires the run-owned transport')
         self.health = SourceHealth(source=self.name, status="disabled")
         if not self.enabled:
             return []
@@ -107,7 +116,8 @@ class Source(ABC):
         if self.limit is not None:
             items = items[: self.limit]
         self.health.item_count = len(items)
-        self.health.note_stage("discovery", "succeeded")
+        if not self.health.board_results and not self.health.query_results:
+            self.health.note_stage("discovery", "succeeded")
         if self.health.status == "ok":
             self.health.status = "ok" if items else "empty"
         if self.health.status in {"partial", "failed"}:

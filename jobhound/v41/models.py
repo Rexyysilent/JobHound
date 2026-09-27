@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..models import Job
+from .outcomes import OutcomeProjection
 
 
 class SourceKind(str, Enum):
@@ -95,6 +96,14 @@ class PayCandidate(BaseModel):
     fees: list[str] = Field(default_factory=list)
     net_amount_usd: float | None = None
     labor_time_assumption: str | None = None
+    literal_unit: str = "unknown"
+    parse_warnings: list[str] = Field(default_factory=list)
+    source_span_start: int | None = None
+    source_span_end: int | None = None
+    source_text_sha256: str | None = None
+    source_section: str = "unknown"
+    actor: str = "unknown"
+    guaranteed_minimum: float | None = None
 
     @property
     def midpoint(self) -> float | None:
@@ -298,6 +307,7 @@ class CanonicalJob(BaseModel):
     alternate_urls: list[str] = Field(default_factory=list)
     corroborated_by: list[str] = Field(default_factory=list)
     canonicalization_reason: str = ""
+    outcome_projection: OutcomeProjection | None = None
 
     @property
     def best_observation(self) -> ListingObservation:

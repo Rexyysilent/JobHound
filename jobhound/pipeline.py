@@ -93,8 +93,13 @@ async def ingest_raw_with_health(
     limit: int | None, only: str | None, *,
     transport: httpx.AsyncBaseTransport | None = None,
     exclude: set[str] | None = None,
+    on_batch=None,
 ) -> tuple[list[dict], list[SourceHealth]]:
     """Fetch one shared provider batch plus non-secret source health."""
+    from .run_context import current_run
+    from .bounded_transport import BoundedTransport
+    if current_run() and not isinstance(transport, BoundedTransport):
+        raise ValueError('scoped discovery requires the run-owned transport')
     sources = build_sources(limit=limit, only=only)
     if exclude:
         sources = [source for source in sources if source.name not in exclude]
@@ -102,10 +107,15 @@ async def ingest_raw_with_health(
     async with httpx.AsyncClient(
         headers=headers,
         timeout=CONFIG.http.timeout_seconds,
-        follow_redirects=True,
+        follow_redirects=not bool(current_run()),
         transport=transport,
     ) as client:
-        batches = await asyncio.gather(*(s.fetch(client) for s in sources))
+        async def fetch_one(source):
+            batch = await source.fetch(client)
+            if on_batch:
+                on_batch(batch, source.health)
+            return batch
+        batches = await asyncio.gather(*(fetch_one(s) for s in sources))
     records = [rec for batch in batches for rec in batch]
     return records, [source.health for source in sources]
 

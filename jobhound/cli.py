@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import asynccontextmanager, nullcontext
 import logging
 from pathlib import Path
+import time
 
 from .config import CONFIG
 from .logging_utils import RedactingFormatter
@@ -165,25 +167,128 @@ def _cmd_run_v3(args: argparse.Namespace) -> None:
 # ── feedback ────────────────────────────────────────────────────────────────
 
 def _run_v41(args: argparse.Namespace) -> None:
-    from .v41.digest import build_digest as build_v41_digest
-    from .v41.digest import write_digest as write_v41_digest
-    from .v41.engine import evaluate_raw, refine_scam_with_llm
-    from .v41.replay import comparison_report, write_snapshot
-    from .v41.resolve import resolve_result_urls
-    from .v41.store import V41Store
+    """Run legacy V4.2 or the explicitly approved V6 policy in one frozen scope."""
+    if CONFIG.v55.enabled:
+        if not CONFIG.v55.production_approved:
+            raise SystemExit(
+                'V6 policy is enabled but production_approved is false; '
+                'use review capture/replay or complete the release gate.'
+            )
+        from .run_context import run_scope
+        context = _production_context(CONFIG.model_copy(deep=True))
+        scope = run_scope(context)
+    else:
+        scope = nullcontext()
+    with scope:
+        _run_v41_scoped(args)
 
-    async def fetch_evaluate():
-        raw_records, source_health = await ingest_raw_with_health(
-            limit=args.limit, only=args.source
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _production_context(config, *, root: Path = _REPO_ROOT):
+    """Approved V6 run context; its workspace only holds the request ledger."""
+    from .run_context import RunContext
+    return RunContext.capture(
+        config=config,
+        workspace=root / config.v55.production_fetch.workspace,
+        network_allowed=True,
+        side_effects_allowed=True,
+    )
+
+
+def _production_limits(config):
+    from .bounded_transport import RequestLimits
+    fetch = config.v55.production_fetch
+    return RequestLimits(
+        requests=fetch.requests,
+        seconds=fetch.seconds,
+        request_seconds=fetch.request_seconds,
+        wire_bytes=fetch.wire_bytes,
+        decoded_bytes=fetch.decoded_bytes,
+        concurrency=fetch.concurrency,
+    )
+
+
+@asynccontextmanager
+async def _run_transport(context, inner_transport=None):
+    """The single request-budget owner for one scoped run (discovery + hydration)."""
+    import json
+    import httpx
+    from .bounded_transport import BoundedTransport, RunBudget
+    budget = RunBudget(context, _production_limits(context.config()))
+    transport = BoundedTransport(
+        inner_transport or httpx.AsyncHTTPTransport(retries=0), budget
+    )
+    try:
+        yield transport
+    finally:
+        await transport.close_owned()
+        (Path(context.workspace) / 'request_budget_receipt.json').write_text(
+            json.dumps(budget.receipt(), sort_keys=True), encoding='utf-8'
         )
-        evaluated = evaluate_raw(raw_records)
+
+
+async def _ingest_for_run(args: argparse.Namespace, *, inner_transport=None, transport=None):
+    """Discovery for a run. Scoped (V6) runs go through one run-owned bounded
+    transport; the unscoped V4.2 path keeps its legacy client unchanged."""
+    from .run_context import current_run
+    context = current_run()
+    if context is None:
+        return await ingest_raw_with_health(
+            limit=args.limit, only=args.source, transport=inner_transport
+        )
+    if transport is not None:
+        return await ingest_raw_with_health(
+            limit=args.limit, only=args.source, transport=transport
+        )
+    async with _run_transport(context, inner_transport) as owned:
+        return await ingest_raw_with_health(
+            limit=args.limit, only=args.source, transport=owned
+        )
+
+
+async def _fetch_and_evaluate(args: argparse.Namespace, *, inner_transport=None):
+    """Fetch and evaluate one run.
+
+    V4.2 (unscoped): evaluate, LLM scam pass, legacy URL resolver.
+    V5.5 (approved scope): evaluate, then hydrate like review capture (R1:
+    matching originals become child observations and the run is reassessed;
+    verification cycles persist in a stable namespace so repeated failures
+    move to Watch), all within the discovery transport's request budget.
+    The LLM pass runs after hydration because hydration rebuilds evaluations.
+    """
+    from .run_context import current_run
+    from .v41 import engine, resolve
+    context = current_run()
+    if context is None:
+        raw_records, source_health = await _ingest_for_run(args, inner_transport=inner_transport)
+        evaluated = engine.evaluate_raw(raw_records)
         evaluated.source_health = [item.as_dict() for item in source_health]
         if not args.skip_llm:
-            await refine_scam_with_llm(evaluated)
-        await resolve_result_urls(evaluated)
+            await engine.refine_scam_with_llm(evaluated)
+        await resolve.resolve_result_urls(evaluated)
         return raw_records, evaluated
+    async with _run_transport(context, inner_transport) as transport:
+        raw_records, source_health = await _ingest_for_run(args, transport=transport)
+        evaluated = engine.evaluate_raw(raw_records)
+        evaluated.source_health = [item.as_dict() for item in source_health]
+        await resolve.hydrate_result(
+            evaluated, transport=transport,
+            review_namespace=Path(context.workspace) / 'retrieval',
+        )
+    if not args.skip_llm:
+        await engine.refine_scam_with_llm(evaluated)
+    return raw_records, evaluated
 
-    raw, result = asyncio.run(fetch_evaluate())
+
+def _run_v41_scoped(args: argparse.Namespace) -> None:
+    from .v41.digest import build_digest as build_v41_digest
+    from .v41.digest import write_digest as write_v41_digest
+    from .v41.replay import comparison_report, write_snapshot
+    from .v41.store import V41Store
+
+    raw, result = asyncio.run(_fetch_and_evaluate(args))
     snapshot_path = None
     if CONFIG.engine.capture_snapshots:
         snapshot_path = write_snapshot(raw, result)
@@ -192,7 +297,19 @@ def _run_v41(args: argparse.Namespace) -> None:
     v41_store = V41Store()
     notifiable = v41_store.annotate_transitions(result)
     v41_store.annotate_source_health(result)
-    v41_store.record_run(result)
+    durable_delivery = bool(
+        CONFIG.v55.enabled
+        and CONFIG.delivery.enabled
+        and not args.dry_run
+    )
+    if CONFIG.delivery.enabled and not CONFIG.v55.enabled:
+        v41_store.close()
+        raise SystemExit('durable delivery requires the V6 policy gate')
+    if CONFIG.delivery.enabled and not CONFIG.delivery.production_approved:
+        v41_store.close()
+        raise SystemExit('durable delivery is enabled but production_approved is false')
+    if not durable_delivery:
+        v41_store.record_run(result)
 
     # Trust maintenance remains shared with V3 and keeps its existing cadence
     # store. It cannot alter the immutable V4.2 decision record for this run.
@@ -236,13 +353,73 @@ def _run_v41(args: argparse.Namespace) -> None:
         print("Dry run — no push sent.")
         return
 
+    delivery_report = None
+    delivery_senders = {}
+    if durable_delivery:
+        destinations = []
+        for name in CONFIG.digest.channels:
+            cls = _NOTIFIERS.get(name)
+            if cls is None:
+                print(f"Unknown digest channel {name!r} in config.yaml — skipped.")
+                continue
+            notifier = cls()
+            if not notifier.ready:
+                print(f"{name.capitalize()} not configured (.env) — no {name} push staged.")
+                continue
+            destination = notifier.destination
+            destinations.append(destination)
+            delivery_senders[(destination.channel, destination.key)] = notifier
+        if not destinations:
+            v41_store.close()
+            raise SystemExit('durable delivery has no configured destination')
+        v41_store.enable_delivery_production(
+            workspace_id=CONFIG.delivery.workspace_id,
+            profile_id=CONFIG.delivery.profile_id,
+            approved=CONFIG.delivery.production_approved,
+        )
+        delivery_report = v41_store.record_delivery_run(
+            result,
+            destinations,
+            now=time.time(),
+            card_cap=CONFIG.delivery.card_cap,
+            status_cap=CONFIG.delivery.status_cap,
+            adopt_legacy=True,
+        )
+
     if (
         not digest_build.displayed
         and not alerts
         and not digest_build.operational_alerts
+        and not delivery_report
     ):
         v41_store.close()
         print("No notification-worthy V4.2 jobs — skipping push.")
+        return
+
+    if durable_delivery:
+        from .delivery_transport import DigestTransport, deliver_destination
+        transport = DigestTransport(v41_store.delivery)
+        attempted = 0
+        # Each destination is delivered on its own, so one failing channel's
+        # backlog cannot delay another channel's digest.
+        for destination in destinations:
+            outcomes = asyncio.run(deliver_destination(
+                transport, destination,
+                delivery_senders[(destination.channel, destination.key)],
+                run_id=result.metadata.run_id,
+                limit=CONFIG.delivery.max_envelopes_per_run,
+                max_parts=CONFIG.delivery.max_parts_per_run,
+            ))
+            for envelope, outcome in outcomes:
+                attempted += 1
+                print(
+                    f"{destination.channel.capitalize()} durable delivery: {outcome} "
+                    f"(envelope {envelope[:12]}, provider acceptance is not inbox receipt)"
+                )
+        adopted = delivery_report.get('legacy_baselines_adopted', 0)
+        print(f"Delivery cutover ledger: {adopted} legacy baseline(s) adopted; "
+              f"{attempted} envelope(s) attempted.")
+        v41_store.close()
         return
 
     for name in CONFIG.digest.channels:
@@ -266,8 +443,11 @@ def _run_v41(args: argparse.Namespace) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    if CONFIG.v55.enabled:
-        raise SystemExit('V5 release policy is review-only until the release gates and rollout are approved. Use review capture or review replay; production configuration was not changed.')
+    if CONFIG.v55.enabled and not CONFIG.v55.production_approved:
+        raise SystemExit(
+            'V6 remains review-only until production_approved is true; '
+            'use review capture/replay to inspect it safely.'
+        )
     engine = args.engine or CONFIG.engine.active
     if engine == "v3":
         _cmd_run_v3(args)
@@ -306,8 +486,12 @@ def cmd_replay(args: argparse.Namespace) -> None:
 def cmd_review_capture(args: argparse.Namespace) -> None:
     """Live public capture into an isolated namespace; never opens a store."""
     from .v41.review import capture_review
+    from .run_context import RunContext
+    config = CONFIG.model_copy(deep=True)
+    config.v55.enabled = True
+    context = RunContext.capture(config=config, workspace=args.output_dir, network_allowed=True)
     snapshot, digest = asyncio.run(capture_review(
-        args.output_dir, limit=args.limit, source=args.source
+        args.output_dir, limit=args.limit, source=args.source, context=context
     ))
     print(f"Isolated review snapshot: {snapshot}")
     print(f"Isolated review digest: {digest}")
@@ -319,6 +503,22 @@ def cmd_review_replay(args: argparse.Namespace) -> None:
     output, fingerprint = replay_review(args.snapshot, args.output_dir)
     print(f"Offline review digest: {output}")
     print(f"Decision fingerprint: {fingerprint}")
+
+
+def cmd_review_outcomes(args: argparse.Namespace) -> None:
+    """Reviewed JSONL -> offline action/status preview, never a production import."""
+    from datetime import datetime
+    from .v41.outcome_review import run_outcome_review
+    try:
+        as_of = datetime.fromisoformat(args.as_of.replace('Z', '+00:00'))
+        if as_of.tzinfo is None:
+            raise ValueError('as_of_requires_timezone')
+        output, manifest = run_outcome_review(args.snapshot, args.events, args.bindings,
+            args.output_dir, as_of=as_of, previous_events=args.previous_events)
+    except ValueError:
+        raise SystemExit('Outcome review rejected invalid inputs or an unsafe/existing output directory; inspect the documented contract.') from None
+    print(f"Offline outcome preview: {output / 'preview.md'}")
+    print(f"Import accounting: {manifest['import_counts']}")
 
 
 def cmd_feedback(args: argparse.Namespace) -> None:
@@ -511,6 +711,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_review_replay.add_argument("--output-dir", required=True,
                                  help="explicit isolated output namespace")
     p_review_replay.set_defaults(func=cmd_review_replay)
+
+    p_outcomes = review_sub.add_parser('outcomes', help='offline reviewed outcome JSONL preview; no production import')
+    p_outcomes.add_argument('snapshot')
+    p_outcomes.add_argument('--events', required=True)
+    p_outcomes.add_argument('--bindings', required=True)
+    p_outcomes.add_argument('--as-of', required=True, help='explicit timezone-aware evidence/review time')
+    p_outcomes.add_argument('--previous-events', help='previous validated review journal for idempotent imports')
+    p_outcomes.add_argument('--output-dir', required=True, help='NEW nonproduction review directory')
+    p_outcomes.set_defaults(func=cmd_review_outcomes)
 
     p_fb = sub.add_parser("feedback", help="record an operator outcome (class-1 evidence)")
     p_fb.add_argument("--platform", type=str, default=None, help="platform_key from the registry")

@@ -301,10 +301,29 @@ class EmailIngestCfg(BaseModel):
     sender_platform_map: dict[str, str] = Field(default_factory=dict)
 
 
+class ProductionFetchCfg(BaseModel):
+    """Bounded-transport limits for approved production V6 runs.
+
+    Review captures keep the small ``request_budget``/2 MB defaults. Production
+    needs real-feed sizes: the LILT Ashby board is ~6.2 MB decoded and a full
+    run makes ~55-80 discovery requests.
+    """
+
+    workspace: str = "runtime/v6"          # request ledger; never data/ or the repo root
+    requests: int = Field(default=200, ge=1, le=2000)
+    seconds: float = Field(default=600, gt=0, le=3600)
+    request_seconds: float = Field(default=60, gt=0, le=600)
+    wire_bytes: int = Field(default=16_000_000, ge=1_000_000, le=200_000_000)
+    decoded_bytes: int = Field(default=32_000_000, ge=1_000_000, le=400_000_000)
+    concurrency: int = Field(default=4, ge=1, le=16)
+
+
 class V55Cfg(BaseModel):
-    """Review-only release policy. Production activation requires approval."""
+    """Release policy. Live execution requires the separate approval gate."""
 
     enabled: bool = False
+    production_approved: bool = False
+    production_fetch: ProductionFetchCfg = Field(default_factory=ProductionFetchCfg)
     enrichment_shortlist: int = Field(default=40, ge=0, le=200)
     request_budget: int = Field(default=60, ge=0, le=500)
     time_budget_seconds: float = Field(default=180, gt=0, le=1800)
@@ -324,8 +343,22 @@ class V55Cfg(BaseModel):
     account_states: list[dict] = Field(default_factory=list)
 
 
+class DeliveryCfg(BaseModel):
+    """Durable production delivery is separately gated from decision semantics."""
+
+    enabled: bool = False
+    production_approved: bool = False
+    workspace_id: str = "jobhound"
+    profile_id: str = "default"
+    card_cap: int = Field(default=15, ge=0, le=100)
+    status_cap: int = Field(default=5, ge=0, le=100)
+    max_parts_per_run: int = Field(default=32, ge=1, le=32)
+    max_envelopes_per_run: int = Field(default=4, ge=1, le=16)
+
+
 class Config(BaseModel):
     v55: V55Cfg = V55Cfg()
+    delivery: DeliveryCfg = DeliveryCfg()
     engine: EngineCfg = EngineCfg()
     v41: V41Cfg = V41Cfg()
     sources: SourcesCfg = SourcesCfg()
@@ -357,4 +390,6 @@ def load_config(path: Path | str | None = None) -> Config:
     return Config.model_validate(data)
 
 
-CONFIG = load_config()
+from .run_context import ConfigView
+
+CONFIG = ConfigView(load_config())

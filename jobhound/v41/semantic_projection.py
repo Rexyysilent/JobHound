@@ -49,13 +49,10 @@ def project_semantic_case(case_input: dict[str, Any]) -> dict[str, Any]:
         identity_state=str(case_input.get("identity_match") or "uncertain"))
     canonical = CanonicalJob(canonical_id="semantic-fixture", job=job, observations=[observation],
         field_sources={"title": "fixture", "description": "fixture", "url": "fixture"})
-    prior_enabled = CONFIG.v55.enabled
-    CONFIG.v55.enabled = True
-    try:
+    from .review import _review_enabled
+    with _review_enabled():
         requirements = assess_requirements(canonical, profile)
         pay_candidates, selected_pay, pay_conflict = extract_pay_candidates(canonical)
-    finally:
-        CONFIG.v55.enabled = prior_enabled
     semantics = classify_role_semantics(title, description, job.url, profile)
     role = assess_role(canonical, [], {}, profile)
     return {"requirements": {"mandatory_languages": requirements.language_required,
