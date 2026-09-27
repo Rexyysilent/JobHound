@@ -154,5 +154,35 @@
     "kind": "credential_query",
     "sha256": "2d7c6d2fbef42e4656b9315462797e5313376e29557194b5766d25047a347aa8",
     "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_v57_outcomes.py",
+    "kind": "credential_query",
+    "sha256": "84d44727d30bfb09f2053dc62fd03c062a9104e82da9e0d5b0baab76dbf15b05",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_v6_delivery_challenges.py",
+    "kind": "credential_query",
+    "sha256": "a77e9f802b9fc33ba8f5661209f05edb59789caa104a9c7784e47468502c0116",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_v6_isolation_limits.py",
+    "kind": "credential_assignment",
+    "sha256": "6cb648a4263501e109a5148243e3dda7fab8ba3e04d7c681fbce5e491edbcb78",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_v6_isolation_limits.py",
+    "kind": "credential_assignment",
+    "sha256": "bea0e814421bff3a0f569a23651279ec46a321f9cfa7e8131b319dafbadf6022",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_v6_transport.py",
+    "kind": "credential_assignment",
+    "sha256": "798aba71d8ab3b398999e659a8f59900149d26056c472e43973ec2529d643d7d",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
   }
 ]

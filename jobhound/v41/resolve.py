@@ -608,6 +608,9 @@ async def hydrate_result(
         )
     health = StageHealth("hydration")
     budget = RetrievalBudget(policy, review_namespace=review_namespace)
+    from ..bounded_transport import BoundedTransport
+    shared_owner = transport.budget if isinstance(transport, BoundedTransport) else None
+    requests_before = shared_owner.receipt()['requests_reserved'] if shared_owner else 0
     as_of_ts = result.metadata.as_of.timestamp()
     max_cycles = getattr(getattr(CONFIG, "v55", None), "max_automatic_cycles", 2)
     watch_days = getattr(getattr(CONFIG, "v55", None), "watch_recheck_days", 7)
@@ -788,6 +791,8 @@ async def hydrate_result(
         result.accounting_ok = rebuilt.accounting_ok
         result.accounting_errors = rebuilt.accounting_errors
         result.source_health = old_health
+    if shared_owner:
+        budget.requests = shared_owner.receipt()['requests_reserved'] - requests_before
     stage = {
         "source": "retrieval",
         "transport_host": "multiple",

@@ -186,11 +186,17 @@ def _number(value: str) -> float:
 
 
 def _modality(text: str, *, default_required: bool = False) -> str:
+    # "No ..." negates only its own clause: "No exceptions: German is mandatory"
+    # still requires German. Commas stay allowed for lists ("No degree, diploma ...").
+    if CONFIG.v55.enabled and re.search(
+        r"\b(?:not\s+|no\s+[^.;:!?\n]{0,40}\b)(?:required|mandatory|necessary)\b", text, re.I
+    ):
+        return "explicitly_not_required"
     if _PREFERRED.search(text):
         return "preferred"
     if _OPTIONAL.search(text):
         return "optional"
-    if _REQUIRED.search(text):
+    if _REQUIRED.search(text) or (CONFIG.v55.enabled and re.search(r"\bmandatory\b", text, re.I)):
         return "minimum" if re.search(r"\b(?:minimum|at\s+least)\b", text, re.I) else "required"
     return "required" if default_required else "unknown"
 
@@ -228,7 +234,9 @@ def _language_claims(
             continue
         if _NON_APPLICANT_CONTEXT.search(segment) and not _APPLICANT_ACTOR.search(segment):
             continue
-        if not default_required and not _LANGUAGE_CUE.search(segment) and not _REQUIRED.search(segment):
+        if not default_required and not _LANGUAGE_CUE.search(segment) and not _REQUIRED.search(segment) and not (
+            CONFIG.v55.enabled and re.search(r"\b(?:fluency|mandatory)\b", segment, re.I)
+        ):
             continue
         modality = _modality(segment, default_required=default_required)
         between = normalize_match(segment).casefold()
@@ -259,6 +267,17 @@ def _title_language_claims(
         _canon_lang(value)
         for value in _title_language_requirements(title, profile.known_languages)
     }
+    if CONFIG.v55.enabled:
+        # A language directly modifying a document-processing occupation is a
+        # demand, unlike the language of customers or a cultural subject.
+        prefix = re.match(
+            r'^(?:freelance\s+)?(?P<language>[\w -]{2,40}?)\s+'
+            r'(?:(?:pdf|document|text|audio)\s+)?'
+            r'(?:annotation|transcription|translation|localization)\b',
+            normalize_match(title).casefold(),
+        )
+        if prefix and prefix['language'] in profile.known_languages:
+            required.add(_canon_lang(prefix['language']))
     pairs = {
         _canon_lang(value)
         for value in _title_language_pairs(title, profile.known_languages)
@@ -405,12 +424,27 @@ def _location_claims(
             predicate="holds_credential",
             polarity="negative" if modality == "explicitly_not_required" else "positive",
         ))
-    for segment in _segments(text):
+    location_segments = _segments(text)
+    if CONFIG.v55.enabled:
+        # Keep exclusion polarity local to contrast/exception clauses.
+        location_segments = (
+            clause for segment in location_segments
+            for clause in re.split(r"\s+(?=(?:but|whereas|except|excluding)\b)", segment, flags=re.I)
+        )
+    for segment in location_segments:
         folded = normalize_match(segment).casefold()
-        if not structured and _LOCATION_SCOPE_CUE.search(folded) is None:
+        exclusion = CONFIG.v55.enabled and re.search(
+            r"\b(?:not\s+eligible|ineligible|excluded)\b|^\s*(?:except|excluding)\b", folded
+        )
+        if not structured and _LOCATION_SCOPE_CUE.search(folded) is None and not exclusion:
             continue
         values: list[str] = []
         for canonical, aliases in _LOCATION_ALIASES.items():
+            # This patch adds UK to exclusion evidence only. Broadening positive
+            # country inference also misreads regional salary ranges as locks.
+            # Existing explicit UK-only gates remain unchanged.
+            if exclusion and canonical == "united_kingdom":
+                aliases = (*aliases, "uk")
             if any(
                 re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", folded)
                 for alias in aliases
@@ -430,7 +464,7 @@ def _location_claims(
             confidence=0.98 if structured else 0.94,
             actor="applicant",
             predicate="resides_in",
-            polarity=("negative" if re.search(
+            polarity=("negative" if exclusion or re.search(
                 r"\b(?:cannot|can't|not\s+accept|excluding|except)\b", folded
             ) else "positive"),
         ))

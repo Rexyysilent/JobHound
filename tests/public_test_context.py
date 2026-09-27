@@ -30,7 +30,7 @@ def install():
 
     frozen = load_config(fixtures / "config.yaml")
     # Mutate the existing object; imported references must see the same policy.
-    for name in type(CONFIG).model_fields:
+    for name in type(frozen).model_fields:   # CONFIG is a run-aware ConfigView
         setattr(CONFIG, name, getattr(frozen, name))
     CONFIG.trust.registry_file = str(fixtures / "platform_registry.yaml")
     # Import consumers after configuring: some legacy helpers bind CONFIG

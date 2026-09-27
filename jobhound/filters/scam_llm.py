@@ -280,6 +280,8 @@ async def second_pass(jobs: list[Job], cfg: ScamLlmCfg = CONFIG.scam.llm, *,
                       pending_path: Path = _PENDING_PATH,
                       store: CallBudget | None = None) -> int:
     """Batch-refine borderline scores; return the number classified by Gemini."""
+    from ..run_context import deny_review_side_effect
+    deny_review_side_effect('LLM requests')
     if not cfg.enabled or not settings.gemini_api_key:
         return 0
 

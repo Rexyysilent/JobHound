@@ -166,6 +166,21 @@ class RetrievalBudget:
 
 
 async def _request(client: httpx.AsyncClient, budget: RetrievalBudget, url: str) -> httpx.Response:
+    from ..bounded_transport import BoundedTransport
+    from ..run_context import current_run
+    if isinstance(client._transport, BoundedTransport):
+        owner = client._transport.budget
+        remaining = min(owner.remaining(), owner.limits.request_seconds)
+        if remaining <= 0:
+            raise RuntimeError('time_budget_exhausted')
+        try:
+            async with asyncio.timeout(remaining):
+                await _validate_destination(url, skip_dns=client._transport.is_mock)
+        except TimeoutError as exc:
+            raise RuntimeError('dns_time_budget_exhausted') from exc
+        return await client.get(url, follow_redirects=False)
+    if current_run():
+        raise ValueError('scoped hydration requires the run-owned transport')
     gate = await budget.acquire(url)
     async with gate:
         await _validate_destination(url, skip_dns=isinstance(client._transport, httpx.MockTransport))
@@ -253,6 +268,72 @@ class _LeafParser(HTMLParser):
         if tag.casefold() == "a":
             for name, value in attrs:
                 if name.casefold() == "href" and value: self.hrefs.append(value)
+
+
+class _ClosureBlocks(HTMLParser):
+    """Narrow single-role notice capture, not a forum/actor inference engine."""
+    boundaries = {'p', 'div', 'section', 'article', 'main', 'footer', 'h1', 'h2', 'li', 'br'}
+    voids = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+        self.parts, self.blocks, self.headings, self.heading = [], [], [], []
+
+    def flush(self):
+        text = ' '.join(' '.join(self.parts).split())
+        if text:
+            self.blocks.append(text)
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag in self.boundaries:
+            self.flush()
+        skip = bool(self.stack and self.stack[-1][1]) or tag in {
+            'script', 'style', 'noscript', 'blockquote', 'aside', 'nav', 'template'
+        } or 'hidden' in attrs or attrs.get('aria-hidden') == 'true'
+        marker = (attrs.get('class') or '') + ' ' + (attrs.get('id') or '')
+        skip = skip or bool(re.search(r'comment|reply|quote|related', marker, re.I))
+        skip = skip or bool(re.search(r'display\s*:\s*none|visibility\s*:\s*hidden', attrs.get('style') or '', re.I))
+        if tag not in self.voids:
+            self.stack.append((tag, skip))
+        if tag == 'h1' and not skip:
+            self.heading = []
+
+    def handle_endtag(self, tag):
+        if tag in self.boundaries:
+            self.flush()
+        if tag == 'h1' and self.heading:
+            self.headings.append(' '.join(' '.join(self.heading).split()))
+            self.heading = []
+        for i in range(len(self.stack)-1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                break
+
+    def handle_data(self, data):
+        if self.stack and self.stack[-1][1]:
+            return
+        self.parts.append(data)
+        if any(tag == 'h1' for tag, _ in self.stack):
+            self.heading.append(data)
+
+
+def _scoped_closure(body: str, title: str) -> dict | None:
+    parser = _ClosureBlocks()
+    parser.feed(body)
+    parser.flush()
+    if len(parser.headings) != 1 or parser.headings[0].casefold() != ' '.join(title.split()).casefold():
+        return None
+    pattern = (r'(?:this (?:job|role|position|project) (?:is|has been) (?:now |already )?'
+               r'(?:closed|filled|completed)|applications for this (?:job|role|position|project) '
+               r'are (?:now )?closed)[.!]?')
+    for text in parser.blocks:
+        if re.fullmatch(pattern, text, re.I):
+            return {'text': text, 'scope': 'single_exact_role_heading',
+                    'extractor': 'v57-scoped-closure-1'}
+    return None
 
 
 async def discover_public_leaves(client: httpx.AsyncClient, budget: RetrievalBudget,
@@ -471,8 +552,12 @@ async def hydrate_public_posting(
         if hydrated is None:
             return HydrationResult(state="partial", source=source, request_url=request_url, public_url=public, payload=sanitize_payload(payload), error="incomplete_jobposting")
         identity = _exact_identity(original, hydrated, "", payload)
+        from ..config import CONFIG
+        notice = _scoped_closure(response.text, hydrated.title) if CONFIG.v55.enabled and identity in {'exact', 'corroborated'} else None
+        if notice:
+            payload = dict(payload, _closure_evidence=notice)
         valid = payload.get("validThrough")
-        explicitly_closed = payload.get("isListed") is False
+        explicitly_closed = payload.get("isListed") is False or notice is not None
         if valid:
             try: explicitly_closed = explicitly_closed or datetime.fromisoformat(str(valid).replace("Z", "+00:00")) < datetime.now(timezone.utc)
             except (TypeError, ValueError): pass

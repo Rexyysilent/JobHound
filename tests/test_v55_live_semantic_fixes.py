@@ -72,7 +72,8 @@ def test_publisher_hourly_equivalent_keeps_full_context_but_is_not_wage(monkeypa
     canonical = _canonical("Record Your Daily Routine & Get Paid", f"Earn while doing chores: {raw}.", "https://board.example/jobs/1")
     _, selected, _ = extract_pay_candidates(canonical)
     assert selected is not None
-    assert selected.raw == raw
+    assert selected.raw == f"Earn while doing chores: {raw}."
+    assert canonical.job.description[selected.source_span_start:selected.source_span_end] == selected.raw
     assert selected.actual_unit == "labor_hour_equivalent"
     assert selected.amount_low == selected.amount_high == 10
     assert selected.min_hourly_usd is None and selected.max_hourly_usd is None

@@ -99,6 +99,10 @@ CREATE TABLE IF NOT EXISTS canonical_id_aliases (
 
 class V41Store:
     def __init__(self, path: Path | str | None = None):
+        from ..run_context import deny_review_side_effect
+        deny_review_side_effect('opportunity store access')
+        self._explicit_path = path is not None
+        self.delivery = None
         configured = Path(path or CONFIG.v41.sidecar_db)
         self.path = configured if configured.is_absolute() else _ROOT / configured
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,6 +215,7 @@ class V41Store:
             transition = 'new'
             if previous is not None:
                 old_decision = json.loads(previous['decision_json'])
+                old_assessment = json.loads(previous['assessment_json'])
                 old_pay = json.loads(previous['selected_pay_json'] or 'null')
                 new_pay = item.assessment.selected_pay.model_dump(mode='json') if item.assessment.selected_pay else None
                 old_material = self._material_pay(old_pay)
@@ -222,6 +227,7 @@ class V41Store:
                     old_action != item.decision.next_action
                     or previous['action_band'] != item.decision.action_band.value
                     or old_material != new_material
+                    or bool(old_assessment.get('pay_conflict')) != item.assessment.pay_conflict
                 )
                 transition = 'material_change' if changed else 'none'
             item.decision.notification_transition = transition
@@ -238,7 +244,10 @@ class V41Store:
         from .compensation import parse_compensation
         parsed = parse_compensation(str(pay.get('raw') or ''))
         if parsed.amount_low is not None:
-            return {key: getattr(parsed, key) for key in ('basis', 'currency', 'amount_low', 'amount_high', 'qualifier')}
+            return {key: getattr(parsed, key) for key in (
+                'basis', 'currency', 'amount_low', 'amount_high', 'qualifier',
+                'literal_unit', 'guaranteed_minimum',
+            )}
         fields = ('basis', 'min_hourly_usd', 'max_hourly_usd', 'fixed_amount_usd', 'currency', 'up_to')
         return {key: pay.get(key) for key in fields}
 
@@ -310,9 +319,10 @@ class V41Store:
         return result.source_health
 
     def record_run(self, result: RunResult) -> None:
+        from ..delivery_outbox import transaction
         now = datetime.now(timezone.utc).isoformat()
         status = "complete" if result.accounting_ok else "failed_accounting"
-        with self.conn:
+        with transaction(self.conn):
             self.conn.execute(
                 """
                 INSERT INTO runs(
@@ -473,6 +483,147 @@ class V41Store:
                         now,
                     ),
                 )
+
+    def enable_delivery_review(self, *, review_root, workspace_id, profile_id):
+        """Explicit disposable-copy opt-in; never enabled by production CLI.
+
+        A configured production path is forbidden even when passed explicitly.
+        The caller must create/select a dedicated review directory first.
+        """
+        from ..delivery_outbox import DeliveryOutbox
+        root = Path(review_root).resolve()
+        production = Path(CONFIG.v41.sidecar_db)
+        if not production.is_absolute():
+            production = _ROOT / production
+        if (not self._explicit_path or self.path.resolve() == production.resolve()
+                or self.path.resolve().parent != root):
+            raise ValueError('explicit disposable review store required')
+        delivery = DeliveryOutbox(self.conn, workspace_id, profile_id)
+        delivery.import_legacy(evidence='legacy_channel_only_receipts')
+        delivery.backfill_rollback_receipts()
+        self.delivery = delivery
+        return self.delivery
+
+    def enable_delivery_production(self, *, workspace_id, profile_id, approved):
+        """Explicit live opt-in. Configuration and caller approval must agree."""
+        if approved is not True:
+            raise ValueError('literal production delivery approval required')
+        from ..delivery_outbox import DeliveryOutbox
+        delivery = DeliveryOutbox(self.conn, workspace_id, profile_id)
+        delivery.import_legacy(evidence='legacy_channel_only_receipts')
+        delivery.backfill_rollback_receipts()
+        self.delivery = delivery
+        return delivery
+
+    def _crosswalk_legacy_urls(self, result):
+        """Map legacy receipt IDs only when one exact public URL identifies both."""
+        from ..v41.provenance import public_url
+        if self.delivery is None:
+            raise ValueError('delivery is not enabled')
+
+        def key(value):
+            return public_url(value or '').rstrip('/').casefold()
+
+        current = {}
+        for item in result.evaluated:
+            value = key(item.job.url)
+            if value:
+                current.setdefault(value, set()).add(item.canonical.canonical_id)
+        legacy = {}
+        from ..delivery_outbox import V6_RECEIPT_TRANSITION
+        rows = self.conn.execute(
+            '''SELECT DISTINCT n.canonical_id,c.current_job_json
+               FROM notification_events n
+               JOIN canonical_jobs c ON c.canonical_id=n.canonical_id
+               WHERE n.success=1 AND n.transition<>?''',
+            (V6_RECEIPT_TRANSITION,),
+        ).fetchall()
+        for row in rows:
+            try:
+                value = key(json.loads(row['current_job_json']).get('url'))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if value:
+                legacy.setdefault(value, set()).add(row['canonical_id'])
+
+        mapped = ambiguous = 0
+        for value in sorted(set(current) & set(legacy)):
+            if len(current[value]) != 1:
+                ambiguous += 1
+                # A historical success exists, but the current URL identifies
+                # more than one subject. Do not guess an alias and do not let
+                # either row become a fresh send during cutover. These holds
+                # require an explicit operator reconciliation.
+                channels = set()
+                for old_id in legacy[value]:
+                    channels.update(row['channel'] for row in self.conn.execute(
+                        '''SELECT channel FROM delivery_legacy
+                           WHERE workspace=? AND profile=? AND subject=?''',
+                        (self.delivery.workspace, self.delivery.profile, old_id),
+                    ).fetchall())
+                for new_id in current[value]:
+                    for channel in channels:
+                        self.conn.execute(
+                            '''INSERT INTO delivery_legacy VALUES(?,?,?,?,?)
+                               ON CONFLICT(workspace,profile,subject,channel)
+                               DO UPDATE SET evidence=excluded.evidence''',
+                            (self.delivery.workspace, self.delivery.profile, new_id,
+                             channel, 'ambiguous_exact_public_url_crosswalk'),
+                        )
+                continue
+            new_id = next(iter(current[value]))
+            for old_id in sorted(legacy[value]):
+                if self.delivery.register_legacy_crosswalk(
+                    old_id,
+                    new_id,
+                    evidence='exact_public_url_crosswalk',
+                ):
+                    mapped += 1
+        return {'mapped': mapped, 'ambiguous': ambiguous}
+
+    def record_delivery_run(self, result, destinations, *, now, card_cap=15,
+                            status_cap=5, adopt_legacy=False):
+        """Persist the run, every revision, and selected delivery intents atomically."""
+        from ..delivery_outbox import transaction, stage_delivery_run
+        from ..review_audit import fingerprint, canonical_json
+        if self.delivery is None:
+            raise ValueError('delivery is not explicitly enabled')
+        if not result.accounting_ok:
+            raise ValueError('decision ledger failed')
+        if result.metadata.engine_version != 'v5.0.0-rc1':
+            raise ValueError('delivery requires the gated V5/V6 release policy')
+        destinations = list(destinations)
+        request_hash = fingerprint({'run': result.model_dump(mode='json'),
+                                    'destinations': [(d.channel, d.key) for d in destinations],
+                                    'card_cap': card_cap, 'status_cap': status_cap})
+        with transaction(self.conn):
+            receipt = self.conn.execute(
+                'SELECT request_hash,report FROM delivery_runs WHERE workspace=? AND profile=? AND run_id=?',
+                (self.delivery.workspace, self.delivery.profile, result.metadata.run_id),
+            ).fetchone()
+            if receipt:
+                if receipt['request_hash'] != request_hash:
+                    raise ValueError('run ID reused with a different delivery request')
+                return json.loads(receipt['report'])
+            crosswalk = self._crosswalk_legacy_urls(result) if adopt_legacy else {
+                'mapped': 0, 'ambiguous': 0
+            }
+            self.record_run(result)
+            report = stage_delivery_run(
+                self.delivery, result, destinations, now=now,
+                card_cap=card_cap, status_cap=status_cap,
+            )
+            if adopt_legacy:
+                report['legacy_crosswalk'] = crosswalk
+                report['legacy_baselines_adopted'] = self.delivery.adopt_legacy_baselines(
+                    destinations, now=now,
+                )
+            self.conn.execute(
+                'INSERT INTO delivery_runs VALUES(?,?,?,?,?)',
+                (self.delivery.workspace, self.delivery.profile, result.metadata.run_id,
+                 request_hash, canonical_json(report)),
+            )
+            return report
 
     def mark_notified(
         self,

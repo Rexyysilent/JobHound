@@ -1,0 +1,202 @@
+{
+  "protocol": "Regression copy of the frozen 26-case challenge. fixed-buyer unit oracle corrected to fixed_project per retained adjudication; original challenge and failures are preserved outside candidate.",
+  "cases": [
+    {
+      "id": "hourly-control",
+      "quote": "Compensation is USD 18 per working hour.",
+      "expect": {
+        "unit": "labor_hour",
+        "min": 18
+      }
+    },
+    {
+      "id": "word-unit",
+      "quote": "Compensation is USD 0.04 per translated word.",
+      "expect": {
+        "not_hourly": true
+      }
+    },
+    {
+      "id": "recorded-audio",
+      "quote": "Compensation is USD 35 per recorded audio hour.",
+      "expect": {
+        "not_hourly": true
+      }
+    },
+    {
+      "id": "speed-equivalent",
+      "quote": "Fast workers may earn an equivalent of up to USD 45 per hour, depending on task completion speed.",
+      "expect": {
+        "not_hourly": true
+      }
+    },
+    {
+      "id": "coaching-fee",
+      "quote": "Applicants pay USD 45 per hour for optional coaching. Compensation for this role has not been disclosed.",
+      "expect": {
+        "no_selected_pay": true
+      }
+    },
+    {
+      "id": "forum-comment-author",
+      "quote": "Comment by a previous worker: I earned USD 80 per hour at another company. Original poster: compensation for this opening is not yet confirmed.",
+      "expect": {
+        "no_selected_pay": true
+      }
+    },
+    {
+      "id": "supervisor-other-role",
+      "quote": "Supervisors receive USD 55 per hour. This evaluator role pays USD 12 per hour.",
+      "expect": {
+        "not_min": 55
+      }
+    },
+    {
+      "id": "role-pay-table",
+      "quote": "Rates by role:\nGerman reviewer | USD 25 per hour\nBengali reviewer | USD 8 per hour",
+      "expect": {
+        "not_min": 25
+      }
+    },
+    {
+      "id": "illustrative-rate",
+      "quote": "Training example only: USD 99 per hour. This figure is fictional and is not an offer of compensation.",
+      "expect": {
+        "no_selected_pay": true
+      }
+    },
+    {
+      "id": "weekly-salary",
+      "quote": "Compensation is USD 1000 per week.",
+      "expect": {
+        "unit": "week",
+        "not_hourly": true
+      }
+    },
+    {
+      "id": "fixed-buyer",
+      "title": "n8n WhatsApp webhook integration",
+      "description": "We need an n8n workflow connecting WhatsApp incoming webhooks to a spreadsheet. Fixed budget USD 350. Deliver source and setup instructions. Contractors in India welcome.",
+      "url": "https://www.upwork.com/jobs/~021234567890123456789",
+      "expect": {
+        "unit": "fixed_project"
+      }
+    },
+    {
+      "id": "seller-catalog",
+      "title": "I will build your n8n integration",
+      "description": "I offer n8n workflow services for USD 350 per project.",
+      "url": "https://www.upwork.com/services/product/development-it-workflow-123",
+      "expect": {
+        "no_selected_pay": true,
+        "not_primary": true
+      }
+    },
+    {
+      "id": "board-index",
+      "title": "Browse all Bengali reviewer jobs",
+      "description": "Browse our open jobs. Typical roles pay USD 25 per hour.",
+      "url": "https://www.opentrain.ai/jobs/",
+      "expect": {
+        "no_selected_pay": true,
+        "not_primary": true
+      }
+    },
+    {
+      "id": "bengali-positive",
+      "quote": "Compensation is USD 14 per hour.",
+      "expect": {
+        "not_rejected": true
+      }
+    },
+    {
+      "id": "hindi-positive",
+      "title": "Hindi AI Response Reviewer",
+      "description": "Review Hindi AI responses against a supplied rubric. Hindi fluency required. Remote applicants in India welcome. No degree or prior experience required. Compensation: USD 15 per hour.",
+      "expect": {
+        "not_rejected": true
+      }
+    },
+    {
+      "id": "german-negative",
+      "title": "German AI Response Reviewer",
+      "description": "Review German AI responses. German fluency is mandatory. Remote applicants in India welcome. Compensation: USD 15 per hour.",
+      "expect": {
+        "rejected": true
+      }
+    },
+    {
+      "id": "medical-specialist",
+      "title": "Licensed Neurologist - AI Clinical Review",
+      "description": "Active medical licence and board certification in neurology required. Assess clinical cases, not general language quality. Remote in India. USD 80 per hour.",
+      "expect": {
+        "not_primary": true
+      }
+    },
+    {
+      "id": "eda-specialist",
+      "title": "NgSpice Circuit Simulation Expert",
+      "description": "Design analog circuits and validate transistor models using NgSpice. Electronics expertise is mandatory. Remote India. USD 45 per hour.",
+      "expect": {
+        "not_primary": true
+      }
+    },
+    {
+      "id": "delivery-lead",
+      "title": "Head of AI Training Delivery",
+      "description": "Lead a 40-person delivery team and own budget and client relationships. Ten years of leadership experience required. Remote India. USD 70 per hour.",
+      "expect": {
+        "not_primary": true
+      }
+    },
+    {
+      "id": "canada-only",
+      "description": "Review Bengali AI responses. Applicants must reside in Canada. India residents are not eligible. Compensation USD 20 per hour.",
+      "expect": {
+        "rejected": true
+      }
+    },
+    {
+      "id": "india-excludes-uk",
+      "description": "Review Bengali AI responses. Remote applicants in India may apply. UK residents are not eligible. No degree required. USD 15 per hour.",
+      "expect": {
+        "not_rejected": true
+      }
+    },
+    {
+      "id": "location-conflict",
+      "description": "Remote worldwide. This position is only available to residents of Germany. Bengali AI response review. USD 18 per hour.",
+      "expect": {
+        "not_primary": true
+      }
+    },
+    {
+      "id": "unconfigured-fx",
+      "quote": "Compensation is BRL 30 per hour.",
+      "expect": {
+        "no_usd": true
+      }
+    },
+    {
+      "id": "hourly-wage-no-hours",
+      "quote": "Guaranteed minimum USD 8 per hour. Task availability varies and no weekly hours are guaranteed.",
+      "expect": {
+        "no_guaranteed_hours": true
+      }
+    },
+    {
+      "id": "mixed-currency",
+      "quote": "Compensation is USD 10 to EUR 20 per hour.",
+      "expect": {
+        "not_hourly": true
+      }
+    },
+    {
+      "id": "two-rate-ambiguity",
+      "quote": "Compensation is USD 8 per image or USD 20 per hour depending on assignment.",
+      "expect": {
+        "not_hourly": true
+      }
+    }
+  ]
+}

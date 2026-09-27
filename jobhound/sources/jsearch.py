@@ -20,6 +20,7 @@ import httpx
 from ..config import CONFIG
 from ..settings import settings
 from .base import Source
+from .query_batch import fetch_queries, jsearch_rows
 
 log = logging.getLogger("jobhound.sources")
 
@@ -41,9 +42,7 @@ class JSearchSource(Source):
     async def _fetch(self, client: httpx.AsyncClient) -> list[dict]:
         cfg = CONFIG.sources.jsearch
         headers = {"X-RapidAPI-Key": settings.rapidapi_key, "X-RapidAPI-Host": _HOST}
-        seen_ids: set = set()
-        out: list[dict] = []
-        for query in cfg.queries:
+        def request_args(query):
             params = {
                 "query": query,
                 "num_pages": cfg.num_pages,
@@ -51,15 +50,9 @@ class JSearchSource(Source):
             }
             if cfg.country:
                 params["country"] = cfg.country
-            resp = await client.get(_API, headers=headers, params=params)
-            resp.raise_for_status()
-            data = resp.json().get("data") or {}
-            # v2 wraps the list: {"data": {"jobs": [...]}}; tolerate the old flat list.
-            jobs = data.get("jobs", []) if isinstance(data, dict) else data
-            for job in jobs or []:
-                jid = job.get("job_id")
-                if jid in seen_ids:
-                    continue
-                seen_ids.add(jid)
-                out.append(job)
-        return out
+            return {"params": params}
+        return await fetch_queries(
+            self, client, cfg.queries, method="GET", url=_API, headers=headers,
+            request_args=request_args, rows_from_payload=jsearch_rows,
+            valid_row=lambda row: isinstance(row.get("job_title"), str) and bool(row["job_title"].strip()),
+        )

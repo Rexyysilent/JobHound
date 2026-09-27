@@ -14,6 +14,18 @@ from .provenance import public_url
 _ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+def compact_coverage(lines: list[str], *, limit: int = 5) -> list[str]:
+    """Bound the readable summary while retaining full evidence in local audits."""
+    unique = list(dict.fromkeys(lines))
+    shown = unique[:limit]
+    if len(unique) > limit:
+        shown.append(
+            f"+ {len(unique) - limit} additional source-status updates retained "
+            "in the local run/queue audit."
+        )
+    return shown
+
+
 @dataclass
 class DigestBuild:
     text: str
@@ -133,6 +145,8 @@ def _pay_line(item: EvaluatedJob) -> str:
             )
         if item.assessment.pay_conflict:
             caveat += '; conflicting pay claims: verify before committing'
+        if selected.parse_warnings:
+            caveat += '; parsing caveats: ' + ', '.join(selected.parse_warnings)
         return f'{claim} ({basis}; {support}){caveat}'
     source_kind = (
         selected.observation_source_kind.value
@@ -618,7 +632,11 @@ def _build_release_digest(result, *, items, include_all, top_n, per_company_cap,
     if not counts['displayed_primary']:
         lines.extend(['No new verified actions today.', ''])
     if health:
-        lines.extend(['Coverage degraded/status:', *dict.fromkeys(health), ''])
+        lines.extend([
+            'Coverage degraded/status (not evidence of job closure):',
+            *compact_coverage(health),
+            '',
+        ])
     if errors:
         lines.extend(['INTEGRITY FAILURE — normal opportunity delivery blocked.', *errors])
     else:

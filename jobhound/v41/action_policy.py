@@ -43,6 +43,15 @@ def captured_state(canonical: CanonicalJob) -> dict:
             matches.append(state)
     for state in sorted(matches, key=lambda s: str(s.get('observed_at') or '')):
         result.update(state)
+    if canonical.outcome_projection is not None:
+        from .outcomes import compatibility_state
+        conflicts = []
+        for key, value in compatibility_state(canonical.outcome_projection).items():
+            if key in result and result[key] != value:
+                conflicts.append(key)
+            else:
+                result[key] = value
+        result['_outcome_legacy_conflicts'] = conflicts
     return result
 
 
@@ -238,7 +247,111 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
         and payout_confirmed and paid_terms and not account_block
     ):
         assessment.time_to_cash_days = float(timing)
+    if canonical.outcome_projection is not None:
+        apply_reviewed_outcome_action(canonical, assessment, now)
     if assessment.blockers:
         assessment.eligibility = EligibilityStatus.FAILED
         assessment.next_action = 'skip'
         assessment.next_step = 'Do not apply based on this record: ' + '; '.join(assessment.blockers[:3])
+
+
+def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessment,
+                                  now: datetime) -> None:
+    """First offline outcome slice, inside the existing action/decision path.
+
+    Explicit projected state may refine an action but never silently override a
+    conflicting legacy overlay or a suitability blocker. Delivery is separate.
+    """
+    from .outcomes import ActionChecks
+    from ..config import CONFIG
+    projection = canonical.outcome_projection
+    if projection is None or not projection.events:
+        return
+    conflicts = sorted(set(projection.conflicts +
+        assessment.account_state.get('_outcome_legacy_conflicts', [])))
+    if conflicts:
+        assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'outcome_conflict'
+        assessment.action_readiness, assessment.next_action = 'watch', 'verify'
+        assessment.next_step = 'Resolve conflicting scoped evidence for: ' + ', '.join(conflicts)
+        for predicate in conflicts:
+            _task(assessment, canonical, 'outcome_conflict:' + predicate,
+                  'Review the dated facts for this exact application; do not repeat or reverse a step yet.', now)
+        return
+    value = projection.value
+    if value('application_state') in {'rejected', 'withdrawn'}:
+        assessment.lifecycle, assessment.lifecycle_reason = 'closed', 'exact_application_closed'
+        assessment.action_readiness, assessment.next_action = 'watch', 'await_change'
+        assessment.next_step = 'This application is closed. Do not repeat its assessment; a distinct role or application remains separate.'
+        assessment.verification_tasks = []
+        return
+    if value('project_access') == 'blocked':
+        assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'known_account_block'
+        assessment.action_readiness, assessment.next_action = 'watch', 'verify'
+        assessment.next_step = 'Wait for exact project-access restoration or resolve this recorded access blocker; do not repeat onboarding.'
+        return
+    if value('assessment_state') in {'completed', 'passed'}:
+        assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'assessment_already_completed'
+        assessment.action_readiness, assessment.next_action = 'watch', 'await_response'
+        assessment.next_step = 'The existing assessment is complete; wait for its outcome or allocation, not another test.'
+        assessment.verification_tasks = []
+        return
+    if assessment.blockers or assessment.account_state.get('applicable_block'):
+        return
+    if assessment.lifecycle_reason == 'known_account_block':
+        return
+
+    def current(predicate):
+        facts = projection.facts(predicate)
+        return bool(facts) and any(
+            fact.source_kind != 'reviewed_seed' and fact.event_at is not None
+            and fact.event_at <= now
+            and (now - fact.event_at).total_seconds() <= CONFIG.v55.verification_ttl_hours * 3600
+            and (fact.expires_at is None or now < fact.expires_at)
+            for fact in facts
+        )
+
+    if value('buyer_reply') is not None:
+        if not current('buyer_reply'):
+            assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'buyer_update_needs_recheck'
+            assessment.action_readiness, assessment.next_action = 'watch', 'await_change'
+            assessment.next_step = 'Recheck the existing buyer thread when due; this dated reply is not a new lead.'
+            return
+        # Clarification does not claim that an old quote is a contract for new scope.
+        revision = value('scope_revision')
+        changed = value('buyer_reply') == 'scope_changed' or (
+            revision is not None and revision != value('agreed_scope_revision'))
+        assessment.lifecycle, assessment.lifecycle_reason = 'active', 'current_buyer_reply'
+        assessment.action_readiness, assessment.next_action = 'captured_next_step', 'clarify_scope'
+        assessment.next_step = ('Reconfirm the changed deliverable, hosting/support responsibilities and price in the existing buyer thread; no work or payment is established.'
+            if changed else 'Review the substantive buyer reply and clarify remaining scope and payment terms in that existing thread.')
+        assessment.verification_tasks = [t for t in assessment.verification_tasks if
+            t['missing_fact'] not in {'current_open_status', 'application_route'}]
+        return
+    if value('assessment_state') == 'invited':
+        checks = value('action_checks')
+        ready_checks = isinstance(checks, ActionChecks) and all(
+            getattr(checks, k) is True for k in ('privacy', 'schedule', 'equipment', 'cost'))
+        route = value('assessment_route')
+        fresh = all(current(k) for k in ('assessment_state', 'action_checks', 'assessment_route'))
+        assessment.lifecycle, assessment.lifecycle_reason = 'active', 'existing_assessment_invitation'
+        remaining = [t for t in assessment.verification_tasks if
+                     t['missing_fact'] not in {'current_open_status', 'application_route'}]
+        if assessment.eligibility != EligibilityStatus.PASSED or remaining:
+            assessment.action_readiness, assessment.next_action = 'verification_needed', 'verify'
+            assessment.next_step = (remaining[0]['next_step'] if remaining else
+                'Confirm the exact assessment requirements against documented eligibility before starting it.')
+        elif not ready_checks or not route or not fresh:
+            assessment.action_readiness, assessment.next_action = 'verification_needed', 'verify'
+            assessment.next_step = 'Confirm current assessment access and explicit privacy, schedule, equipment and cost compatibility before taking the existing test.'
+            _task(assessment, canonical, 'assessment_prerequisites', assessment.next_step, now)
+        else:
+            assessment.action_readiness, assessment.next_action = 'captured_next_step', 'complete_known_step'
+            assessment.next_step = f'Complete the existing compatible assessment through {route}; invitation is not selection or paid allocation.'
+            assessment.verification_tasks = [t for t in assessment.verification_tasks if
+                t['missing_fact'] not in {'current_open_status', 'application_route'}]
+        return
+    if value('project_access') == 'accessible' and not current('project_access'):
+        assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'access_evidence_stale'
+        assessment.action_readiness, assessment.next_action = 'watch', 'verify'
+        assessment.next_step = 'Recheck this dated access-restoration evidence before further onboarding.'
+        _task(assessment, canonical, 'project_access', assessment.next_step, now)

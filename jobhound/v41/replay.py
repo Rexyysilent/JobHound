@@ -16,6 +16,27 @@ from .provenance import public_url, sanitize_payload
 _ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+# Transport limits, not decision policy: never frozen into or restored from
+# a snapshot header (a restored dict would also break the nested model).
+_NON_POLICY_FIELDS = {"production_fetch"}
+
+
+def release_policy_payload() -> dict:
+    """The V5.5 decision policy that produced a result, for a snapshot header."""
+    policy = sanitize_payload(CONFIG.v55.model_dump(mode="json", exclude=_NON_POLICY_FIELDS))
+    # Capture may have exited its temporary review scope before writing.
+    # Freeze the policy that produced the result, not the restored default.
+    policy["enabled"] = True
+    return policy
+
+
+def restore_release_policy(config, policy: dict | None) -> None:
+    """Apply a snapshot's frozen policy to ``config.v55`` (scalars only)."""
+    for name, value in (policy or {}).items():
+        if name in type(config.v55).model_fields and name not in _NON_POLICY_FIELDS:
+            setattr(config.v55, name, value)
+
+
 def snapshot_dir() -> Path:
     configured = Path(CONFIG.v41.snapshot_dir)
     return configured if configured.is_absolute() else _ROOT / configured
@@ -51,10 +72,7 @@ def write_snapshot(
         ],
     }
     if result.metadata.engine_version == "v5.0.0-rc1":
-        header["release_policy"] = sanitize_payload(CONFIG.v55.model_dump(mode="json"))
-        # Capture may have exited its temporary review scope before writing.
-        # Freeze the policy that produced the result, not the restored default.
-        header["release_policy"]["enabled"] = True
+        header["release_policy"] = release_policy_payload()
         header["account_state_observations"] = [
             sanitize_payload(observation.model_dump(mode="json"))
             for observation in result.observations
@@ -140,12 +158,14 @@ def replay(path: Path | str) -> RunResult:
     if as_of.tzinfo is None:
         as_of = as_of.replace(tzinfo=timezone.utc)
     policy = header.get("release_policy")
-    previous_policy = CONFIG.v55.model_dump(mode="python")
-    if policy:
-        for name, value in policy.items():
-            if name in type(CONFIG.v55).model_fields:
-                setattr(CONFIG.v55, name, value)
-    try:
+    from ..run_context import RunContext, run_scope, current_run
+    config = CONFIG.model_copy(deep=True)
+    restore_release_policy(config, policy)
+    prior = current_run()
+    context = RunContext.capture(config=config, as_of=as_of,
+                                 workspace=prior.workspace if prior else '.',
+                                 run_id=prior.run_id if prior else None)
+    with run_scope(context):
         seed = evaluate_raw(raw, as_of=as_of)
         observations = list(seed.observations)
         for encoded in [*(header.get("hydration_observations") or []),
@@ -156,10 +176,6 @@ def replay(path: Path | str) -> RunResult:
                 continue
         result = (evaluate_observations(observations, as_of=as_of, raw_count=len(raw))
                   if len(observations) != len(seed.observations) else seed)
-    finally:
-        if policy:
-            for name, value in previous_policy.items():
-                setattr(CONFIG.v55, name, value)
     result.source_health = list(
         header.get("source_health") or []
     )

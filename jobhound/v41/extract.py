@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -9,9 +10,10 @@ from ..config import CONFIG
 from ..enrich.pay import parse_pay, parse_title_pay
 from ..filters.eligibility import Profile
 from ..filters.matching import phrase_in_text
-from ..text import normalize_match
+from ..text import normalize_match, fold_dashes
 from .models import CanonicalJob, PayCandidate, SourceKind
 from .compensation import parse_compensation
+from .compensation_legacy import parse_compensation as parse_compensation_legacy
 
 _HEADING_CATEGORIES = {
     "role": (
@@ -248,7 +250,34 @@ def _candidate(
     # exact captured evidence.
     semantic_raw = re.sub(r"\s*\.\s*-\s*\.\s*", " - ", raw)
     semantic_raw = re.sub(r"\.\s*(Hourly|/\s*(?:hr|hour)|per\s+hour)\b", r" \1", semantic_raw, flags=re.I)
-    unit_claim = parse_compensation(semantic_raw)
+    if CONFIG.v55.enabled:
+        claim = parse_compensation(semantic_raw)
+        if "no_supported_money_expression" in claim.warnings:
+            return None
+        currency = claim.currency or "unknown"
+        fx = CONFIG.pay.fx_to_usd.get(currency)
+        warnings = list(claim.warnings)
+        if fx is None and claim.currency:
+            warnings.append("missing_currency_conversion")
+        hourly = claim.basis == "labor_hour"
+        fixed = claim.basis == "fixed_project"
+        return PayCandidate(
+            raw=raw.strip(), source_field=source_field, observation_id=observation_id,
+            confidence=confidence, observation_source_kind=source_kind,
+            currency=currency, basis="fixed" if fixed else claim.basis,
+            actual_unit=claim.basis, literal_unit=claim.literal_unit,
+            amount_low=claim.amount_low, amount_high=claim.amount_high,
+            min_hourly_usd=round(claim.amount_low * fx, 4) if hourly and fx is not None and claim.amount_low is not None else None,
+            max_hourly_usd=round(claim.amount_high * fx, 4) if hourly and fx is not None and claim.amount_high is not None else None,
+            fixed_amount_usd=round(claim.amount_low * fx, 4) if fixed and fx is not None and claim.amount_low is not None else None,
+            qualifier=claim.qualifier or "unknown", parse_warnings=warnings,
+            estimated=claim.labor_equivalent_is_estimate,
+            guaranteed=claim.guaranteed_minimum is not None,
+            guaranteed_minimum=claim.guaranteed_minimum,
+            up_to=claim.qualifier in {"up_to", "up_to_equivalent"},
+            labor_hourly_supported=hourly,
+        )
+    unit_claim = parse_compensation_legacy(semantic_raw)
     lo, hi, basis, estimated = parse_pay(semantic_raw, CONFIG.pay)
     precise_units = CONFIG.v55.enabled
     fixed_amount_usd = None
@@ -304,10 +333,11 @@ def _fixed_candidate(
         raw = match.group(0).strip()
         currency = _currency(match.group("currency"))
         amount = float(match.group("amount").replace(",", ""))
-        amount_usd = amount * CONFIG.pay.fx_to_usd.get(currency, 1.0)
+        fx = CONFIG.pay.fx_to_usd.get(currency, None if CONFIG.v55.enabled else 1.0)
+        amount_usd = amount * fx if fx is not None else None
         return PayCandidate(
             raw=raw,
-            fixed_amount_usd=round(amount_usd, 2),
+            fixed_amount_usd=round(amount_usd, 2) if amount_usd is not None else None,
             currency=currency,
             # Legacy projection retained; ``actual_unit`` carries V5.5's
             # precise fixed-project vocabulary.
@@ -319,13 +349,19 @@ def _fixed_candidate(
             amount_low=amount,
             amount_high=amount,
             actual_unit="fixed_project",
+            literal_unit="fixed_project",
             labor_hourly_supported=False,
+            parse_warnings=["missing_currency_conversion"] if fx is None else [],
         )
     return None
 
 
 def _claim_credibility(candidate: PayCandidate) -> float:
     """Score the claim's own observation and field; never borrow URL trust."""
+    if CONFIG.v55.enabled and (candidate.actual_unit == "unknown" or candidate.scope in {
+        "non_opportunity_document", "other_assignment", "non_pay_context",
+    }):
+        return 0.0
     source_kind = candidate.observation_source_kind or SourceKind.UNKNOWN
     if source_kind == SourceKind.CONTENT_FARM:
         return 0.0
@@ -362,6 +398,94 @@ def _claim_credibility(candidate: PayCandidate) -> float:
     return round(max(0.0, min(1.0, candidate.confidence * provenance)), 3)
 
 
+def _pay_context_scope(quote, title):
+    """Explicit attribution only; keep rejected claims available for inspection."""
+    # Denying an expense does not turn the adjacent wage into an expense.
+    context = re.sub(
+        r"\b(?:no|without|zero)\s+(?:application\s+fees?|security\s+deposits?|subscription\s+costs?)\b",
+        "", quote, flags=re.I,
+    )
+    if re.search(
+        r"\b(?:applicants?|candidates?|you)\s+(?:must\s+|will\s+)?pay\b|"
+        r"\b(?:company revenue|annual revenue|funding raised|subscription costs?|application fees?|security deposit)\b|"
+        r"\b(?:training\s+example(?:\s+only)?\s*:|example\s+only\b)|"
+        r"\b(?:illustrative|fictional|hypothetical)\s+(?:pay|rate|wage|salary|amount|figure|example)\b|"
+        r"\b(?:pay|rate|wage|salary|amount|figure)\s+(?:is|are)\s+(?:purely\s+)?(?:illustrative|fictional|hypothetical)\b|"
+        r"\bnot\s+(?:an?\s+)?offer\s+of\s+(?:pay|compensation)\b|"
+        r"^\s*(?:for\s+)?example\s*:", context, re.I,
+    ):
+        return "non_pay_context"
+    if re.search(
+        r"\b(?:other|different)\s+(?:assignments?|roles?|jobs?|projects?|compan(?:y|ies))\b|"
+        r"\b(?:comment\s+by|previous\s+worker|i\s+(?:earned|was\s+paid))\b", quote, re.I,
+    ):
+        return "other_assignment"
+    # Explicit pay subjects may describe another rung of the same team.
+    subject = re.match(
+        r"\s*(?:our\s+|the\s+)?(supervisors?|managers?|directors?|evaluators?|reviewers?|annotators?|trainers?)"
+        r"\s+(?:receive|earn|are\s+paid)\b", quote, re.I,
+    )
+    if subject and title and not re.search(
+        rf"\b{re.escape(subject[1].rstrip('s'))}s?\b", title, re.I
+    ):
+        return "other_assignment"
+    return "role_claim_unverified"
+
+
+def _bind_pay_span(item, text, start, end, document, title=""):
+    """Offsets are into the normalized observation field, never folded text."""
+    item.raw = text[start:end]
+    item.source_span_start, item.source_span_end = start, end
+    item.source_text_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    item.actor = "posting_author_unverified"
+    item.scope = _pay_context_scope(item.raw, title)
+    if not document.actionable:
+        item.scope = "non_opportunity_document"
+    if item.scope == "other_assignment":
+        item.actor = "other_worker_or_role"
+    elif item.scope == "non_pay_context":
+        item.actor = "non_compensation_context"
+    headings = list(re.finditer(r"(?im)^\s*(compensation|pay|salary|benefits|responsibilities|requirements|about us)\s*:?\s*$", text[:start]))
+    item.source_section = headings[-1][1].casefold() if headings else item.source_field
+    return item
+
+
+def _prose_pay_candidates(text, field, observation, document, marketplace=False):
+    # Split only explicit sentence/line boundaries, retaining decimal punctuation.
+    # Multiple claims within one clause abstain in the single-claim parser. Do not
+    # use folded-string offsets to slice the original field.
+    # Upwork search snippets use literal dots around range dashes and Hourly.
+    # Protect those already-recognized rate spans from sentence splitting.
+    protected = [m.span() for m in _MARKETPLACE_HOURLY.finditer(fold_dashes(text))] if marketplace else []
+    boundaries = [0, *[m.end() for m in re.finditer(r"\n|[;!?]|\.(?=\s|$)", text)
+                      if not any(a <= m.start() < b for a, b in protected)], len(text)]
+    for left, right in zip(boundaries, boundaries[1:]):
+        span = text[left:right]
+        if not _CURRENCY.search(span):
+            continue
+        start = left + len(span) - len(span.lstrip())
+        end = right - len(span) + len(span.rstrip())
+        quote = text[start:end]
+        source_field = "marketplace_snippet" if marketplace else field
+        confidence = .95 if marketplace else .85 if field == "title" else .70
+        item = _candidate(quote, source_field, observation.observation_id, confidence, observation.source_kind)
+        if item is None:
+            continue
+        # Bare fixed budgets are only inferred on an individual buyer route.
+        if marketplace and item.actual_unit == "unknown" and (
+            item.amount_low is not None or (
+                item.parse_warnings == ["negative_or_ambiguous_amount"]
+                and _MARKETPLACE_BARE_BUDGET.search(quote)
+            )
+        ):
+            fixed = _fixed_candidate(quote, source_field, observation.observation_id, confidence,
+                                     observation.source_kind, marketplace_project=True)
+            if fixed:
+                item = fixed
+                item.parse_warnings.append("fixed_budget_from_explicit_buyer_context")
+        yield _bind_pay_span(item, text, start, end, document, observation.job.title)
+
+
 def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate], PayCandidate | None, bool]:
     """Collect candidates from every non-farm observation and select by credibility."""
     candidates: list[PayCandidate] = []
@@ -377,6 +501,9 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
             has_non_farm and observation.source_kind == SourceKind.CONTENT_FARM
         ):
             continue
+        if CONFIG.v55.enabled:
+            from .documents import classify_document
+            document = classify_document(job.title, job.description or "", job.url)
         if job.pay_raw:
             source_field = "email" if job.source.startswith("email:") else "structured"
             confidence = 0.98 if source_field == "email" else 0.95
@@ -386,10 +513,22 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
                 guaranteed=job.guaranteed_hours,
             )
             if item is not None:
+                if CONFIG.v55.enabled:
+                    _bind_pay_span(item, job.pay_raw, 0, len(job.pay_raw), document, job.title)
                 key = (item.raw.casefold(), item.source_field, item.observation_id)
                 if key not in seen:
                     seen.add(key)
                     candidates.append(item)
+
+        if CONFIG.v55.enabled:
+            marketplace = "individual_buyer_route" in document.reasons
+            for text, field in ((job.title, "title"), (job.description or "", "description")):
+                for item in _prose_pay_candidates(text, field, observation, document, marketplace):
+                    key = (item.raw.casefold(), item.source_field, item.observation_id)
+                    if key not in seen:
+                        seen.add(key)
+                        candidates.append(item)
+            continue
 
         title_item = parse_title_pay(job.title, CONFIG.pay)
         if title_item is not None:
@@ -510,10 +649,18 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
             for other in candidates
             if other.observation_id != candidate.observation_id
             and distinct_source(candidate.observation_id, other.observation_id)
+            and (not CONFIG.v55.enabled or candidate.scope == other.scope)
             and other.basis == candidate.basis
             and other.min_hourly_usd == candidate.min_hourly_usd
             and other.max_hourly_usd == candidate.max_hourly_usd
             and other.fixed_amount_usd == candidate.fixed_amount_usd
+            and (not CONFIG.v55.enabled or (
+                candidate.amount_low is not None
+                and (other.currency, other.actual_unit, other.literal_unit,
+                     other.amount_low, other.amount_high, other.qualifier)
+                == (candidate.currency, candidate.actual_unit, candidate.literal_unit,
+                    candidate.amount_low, candidate.amount_high, candidate.qualifier)
+            ))
         })
         candidate.claim_credibility = _claim_credibility(candidate)
     candidates.sort(key=lambda item: (
@@ -523,11 +670,14 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
         item.source_field,
         item.raw.casefold(),
     ))
-    selected = candidates[0] if candidates else None
+    selectable = [c for c in candidates if not CONFIG.v55.enabled or c.scope not in {
+        "non_opportunity_document", "other_assignment", "non_pay_context",
+    }]
+    selected = selectable[0] if selectable else None
     if selected is not None:
         selected.selection_reasons.append("highest_claim_credibility")
     conflict = False
-    strong = [candidate for candidate in candidates if candidate.confidence >= 0.65]
+    strong = [candidate for candidate in selectable if candidate.confidence >= 0.65]
     bases = {candidate.basis for candidate in strong}
     if any(value.startswith("fixed") for value in bases) and len(bases) > 1:
         conflict = True
@@ -541,7 +691,7 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
     }) > 1:
         conflict = True
     elif selected and selected.midpoint:
-        for candidate in candidates[1:]:
+        for candidate in selectable[1:]:
             midpoint = candidate.midpoint
             if midpoint is None or candidate.confidence < 0.65:
                 continue
@@ -549,6 +699,13 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
             if difference > 0.25:
                 conflict = True
                 break
+    if CONFIG.v55.enabled:
+        native = [c for c in strong if c.amount_low is not None]
+        units = {(c.currency, c.actual_unit, c.literal_unit, c.qualifier) for c in native}
+        conflict |= len(units) > 1
+        output = {(c.currency, c.literal_unit, c.amount_low, c.amount_high) for c in native if not c.labor_hourly_supported}
+        conflict |= len(output) > 1
+        conflict |= any(c.parse_warnings and c.amount_low is None for c in strong)
     return candidates, selected, conflict
 
 

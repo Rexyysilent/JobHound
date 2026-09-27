@@ -115,10 +115,25 @@ class PlatformMatcher:
 
 
 @lru_cache(maxsize=1)
-def default_registry() -> dict[str, PlatformTrust]:
+def _default_registry() -> dict[str, PlatformTrust]:
     return load_registry()
 
 
 @lru_cache(maxsize=1)
-def default_matcher() -> PlatformMatcher:
+def _default_matcher() -> PlatformMatcher:
     return PlatformMatcher(default_registry())
+
+
+def default_registry() -> dict[str, PlatformTrust]:
+    from ..run_context import current_run
+    context = current_run()
+    return context.registry() if context else _default_registry()
+
+
+def default_matcher() -> PlatformMatcher:
+    from ..run_context import current_run
+    return PlatformMatcher(default_registry()) if current_run() else _default_matcher()
+
+
+default_registry.cache_clear = _default_registry.cache_clear
+default_matcher.cache_clear = _default_matcher.cache_clear

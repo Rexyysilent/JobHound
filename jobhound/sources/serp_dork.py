@@ -19,6 +19,7 @@ import httpx
 from ..config import CONFIG
 from ..settings import settings
 from .base import Source
+from .query_batch import fetch_queries, serp_rows
 
 log = logging.getLogger("jobhound.sources")
 
@@ -39,16 +40,9 @@ class SerpDorkSource(Source):
     async def _fetch(self, client: httpx.AsyncClient) -> list[dict]:
         cfg = CONFIG.sources.serp
         headers = {"X-API-KEY": settings.serper_api_key}
-        seen_links: set = set()
-        out: list[dict] = []
-        for dork in cfg.dorks:
-            resp = await client.post(_API, headers=headers,
-                                     json={"q": dork, "num": cfg.num_results})
-            resp.raise_for_status()
-            for hit in resp.json().get("organic", []) or []:
-                link = hit.get("link")
-                if not link or link in seen_links:
-                    continue
-                seen_links.add(link)
-                out.append(hit)
-        return out
+        return await fetch_queries(
+            self, client, cfg.dorks, method="POST", url=_API, headers=headers,
+            request_args=lambda query: {"json": {"q": query, "num": cfg.num_results}},
+            rows_from_payload=serp_rows,
+            valid_row=lambda row: isinstance(row.get("link"), str) and bool(row["link"].strip()),
+        )

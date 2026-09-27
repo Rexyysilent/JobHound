@@ -184,14 +184,23 @@ def absurd_language_check(title: str) -> list[str]:
     return [f"scam:absurd_language:{match.group(1).lower()}"]
 
 
-def region_lock_check(title: str, description: str = "") -> list[str]:
+def region_lock_check(title: str, description: str = "", *, polarity_aware: bool = False) -> list[str]:
     """Reject explicit non-India country locks even when a job says remote."""
     text = f"{title}\n{(description or '')[:600]}"
     for pattern in (
         _REGION_PAREN, _REGION_PHRASE, _REGION_CITY_COUNTRY, _REGION_LINE
     ):
-        match = pattern.search(text)
-        if match:
+        for match in pattern.finditer(text):
+            if polarity_aware:
+                # Match-local polarity, not a whole-description "not" switch.
+                # A later positive lock must still be checked.
+                before = text[max(0, match.start()-40):match.start()]
+                after = text[match.end():match.end()+55]
+                if re.search(r"\b(?:not|never|excluding|except)\s*$", before, re.I) or re.match(
+                    r"\s+(?:(?:are|is|will\s+be)\s+)?(?:not\s+(?:eligible|accepted|allowed)|ineligible|excluded)\b",
+                    after, re.I,
+                ):
+                    continue
             country = next(group for group in match.groups() if group)
             return [f"region_locked:{country.lower()}"]
     return []

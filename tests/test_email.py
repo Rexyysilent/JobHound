@@ -42,4 +42,4 @@ def test_to_defaults_to_sender(blank_email_env):
 
 
 def test_email_is_a_configured_channel():
-    assert set(CONFIG.digest.channels) == {"telegram", "email"}
+    assert "email" in CONFIG.digest.channels

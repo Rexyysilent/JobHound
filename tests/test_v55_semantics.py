@@ -112,7 +112,11 @@ def test_projection_document_and_original_pay_units():
         "pay_raw": "INR 500 per recorded audio hour",
     })
     assert result["document"].document_type == "seller_service"
-    assert (result["pay"].currency, result["pay"].amount_low, result["pay"].basis) == ("INR", 500, "output_audio_hour")
+    # Seller prices remain inspectable, but are not selected as applicant wages.
+    assert result["pay"] is None
+    claim = next(c for c in result["pay_candidates"] if c.source_field == "structured")
+    assert (claim.currency, claim.amount_low, claim.basis) == ("INR", 500, "output_audio_hour")
+    assert claim.scope == "non_opportunity_document"
 
 
 def test_degree_or_experience_group_uses_documented_alternative():

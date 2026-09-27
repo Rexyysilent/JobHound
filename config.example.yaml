@@ -32,9 +32,32 @@ report:
 scam:
   llm:
     enabled: false
+# V5.5 decision policy with v6 fetching. `run` uses it only when BOTH keys are
+# true; otherwise the legacy V4.2 engine runs. See README "Turning on V5.5".
 v55:
   enabled: false
-  account_states: []
+  production_approved: false
+  account_states: []            # your own dated application/project states (optional)
+  # One bounded HTTP budget per run, shared by discovery and page hydration.
+  production_fetch:
+    workspace: runtime/v6       # request ledger + verification history (ignored by Git)
+    requests: 200               # a full run typically makes ~55-80 discovery requests
+    seconds: 600
+    request_seconds: 60
+    wire_bytes: 16000000        # per response, on the wire
+    decoded_bytes: 32000000     # per response, decompressed (some ATS boards exceed 6 MB)
+    concurrency: 4
+# Durable delivery: an outbox with per-destination receipts, safe retries and
+# no silent re-sends. Requires V5.5. Also set digest.channels and .env.
+delivery:
+  enabled: false
+  production_approved: false
+  workspace_id: jobhound
+  profile_id: default
+  card_cap: 15
+  status_cap: 5
+  max_parts_per_run: 32
+  max_envelopes_per_run: 4      # per destination: up to 3 safe retries + today's digest
 region:
   worldwide_terms:
   - worldwide

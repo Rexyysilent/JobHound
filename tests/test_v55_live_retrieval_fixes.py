@@ -60,7 +60,7 @@ def test_capture_checkpoints_sanitized_raw_before_evaluation_failure(tmp_path, m
 
     target = tmp_path / "review"
     with pytest.raises(RuntimeError, match="deliberate"):
-        asyncio.run(review.capture_review(target))
+        asyncio.run(review.capture_review(target, transport=httpx.MockTransport(lambda r: httpx.Response(500))))
     checkpoint = target / "raw_discovery.json"
     assert checkpoint.exists()
     saved = json.loads(checkpoint.read_text(encoding="utf-8"))
