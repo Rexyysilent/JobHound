@@ -99,7 +99,10 @@ def test_overflow_cards_are_listed_in_the_email_not_silently_dropped(store):
     body = transport.inspect(transport.prepare(EMAIL, ids, now=101,
                                                summary_run_id=value.metadata.run_id))["body"]
     assert "Also eligible (not carded)" in body
-    assert "Jobs this run: 12 eligible; 5 carded above, 7 listed below, 0 already sent earlier." in body
+    # Wording revised after review of 0836247 (card-only counts, current states).
+    assert ("Jobs this run: 12 eligible; 5 newly queued, 7 listed below, "
+            "0 already queued or sent in an earlier run.") in body
+    assert "This email carries 5 job cards" in body
     section = body.split("Also eligible (not carded)", 1)[1]
     listed = [line for line in section.splitlines() if line.startswith("• ")]
     assert len(listed) == 5  # at most five per employer
@@ -109,7 +112,7 @@ def test_overflow_cards_are_listed_in_the_email_not_silently_dropped(store):
     assert "source-health audit" in body.lower() and "data sources, not jobs" in body
 
 
-def test_older_reports_without_an_overflow_list_still_render(store):
+def _render_with_report(store, edit):
     import json
     from jobhound.delivery_transport import DigestTransport
     from test_v6_delivery_recovery import EMAIL, stage
@@ -119,11 +122,28 @@ def test_older_reports_without_an_overflow_list_still_render(store):
     row = store.conn.execute("SELECT rowid, report FROM delivery_runs").fetchone()
     report = json.loads(row[1])
     for destination in report["destinations"]:
-        destination.pop("overflow")
+        edit(destination)
     store.conn.execute("UPDATE delivery_runs SET report=? WHERE rowid=?", (json.dumps(report), row[0]))
     transport = DigestTransport(store.delivery)
     ids = [r["id"] for r in store.delivery.inspect()]
-    body = transport.inspect(transport.prepare(EMAIL, ids, now=101,
+    return transport.inspect(transport.prepare(EMAIL, ids, now=101,
                                                summary_run_id=value.metadata.run_id))["body"]
-    assert "Also eligible" not in body
+
+
+def test_older_reports_without_an_overflow_list_still_render(store):
+    def pre_0836247(destination):
+        for key in ("overflow", "cards", "card_intent_ids"):
+            destination.pop(key)
+    body = _render_with_report(store, pre_0836247)
+    assert "Also eligible" not in body and "Jobs this run" not in body
     assert "7 more eligible jobs are in the local run audit" in body
+
+
+def test_reports_from_0836247_keep_their_overflow_list(store):
+    # Staged with the overflow list but before card accounting.
+    def from_0836247(destination):
+        for key in ("cards", "card_intent_ids"):
+            destination.pop(key)
+    body = _render_with_report(store, from_0836247)
+    assert "Also eligible (not carded)" in body and "+ 2 more from Lilt" in body
+    assert "Jobs this run" not in body

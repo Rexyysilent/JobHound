@@ -101,8 +101,11 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
     if host == "upwork.com" or host.endswith(".upwork.com"):
         if path == "/services/product" or path.startswith("/services/product/"):
             return DocumentClassification("seller_service", "non_opportunity", "seller", False, ("seller_catalogue_route",))
-        # A freelancer's own profile advertises a seller, not buyer demand.
-        if path.startswith("/freelancers/~") or path.startswith("/fl/"):
+        # A freelancer's or agency's own profile advertises a seller, not buyer
+        # demand: /freelancers/~id or /freelancers/<vanity>, /fl/<name>,
+        # /agencies/~id, /ag/<name> and the legacy /o/profiles/users/~id.
+        if (path.startswith(("/freelancers/", "/fl/", "/agencies/", "/ag/", "/o/profiles/"))
+                and path.rstrip("/") not in ("/freelancers", "/agencies")):
             return DocumentClassification("seller_service", "non_opportunity", "seller", False, ("seller_profile_route",))
         if path == "/hire" or path.startswith("/hire/") or path == "/freelancers":
             return DocumentClassification("talent_directory", "index", "buyer_browsing", False, ("talent_directory_route",))

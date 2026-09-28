@@ -111,23 +111,46 @@ OVERFLOW_PER_EMPLOYER = 5
 OVERFLOW_EMAIL_LINES = 40
 
 
-def render_job_summary(ledger):
-    """Jobs line plus the eligible cards the digest caps left out, grouped by employer."""
-    counts, states = ledger['counts'], ledger.get('states', {})
-    held = states.get('legacy_hold', 0)
+def is_card_payload(payload):
+    """A job card (not a status update or coverage line), as render_envelope files it."""
+    decision = payload.get('decision') if isinstance(payload, dict) else None
+    return (payload.get('kind') != 'coverage' and isinstance(decision, dict)
+            and decision.get('lifecycle') == 'active' and decision.get('action_band') != 'reject')
+
+
+def render_job_summary(ledger, *, carded_here, card_states):
+    """Email job accounting plus the eligible cards the digest caps left out.
+
+    `carded_here` counts the cards actually in this email, which can include
+    cards left pending by an earlier run. `card_states` are the current
+    statuses of this run's selected card intents when the email is frozen:
+    production adopts pre-V6 duplicates (accepted) before rendering, so
+    those are suppressed, not awaiting review.
+    """
+    counts = ledger['counts']
+    plural = '' if carded_here == 1 else 's'
+    lines = [f"\nThis email carries {carded_here} job card{plural} (it can include cards "
+             "left pending by an earlier run)."]
+    cards = ledger.get('cards')
     overflow = ledger.get('overflow')
-    eligible = counts['selected_cards'] + counts['overflow_cards'] + counts['already_recorded']
-    carded = counts['selected_cards'] - held
-    held_text = f" {held} held for legacy-duplicate review," if held else ''
+    listed = cards['listed'] if cards is not None else counts.get('overflow_cards', 0)
+    if cards is not None:
+        suppressed = card_states.get('accepted', 0)
+        held = card_states.get('legacy_hold', 0)
+        parts = [f"{cards['selected'] - suppressed - held} newly queued"]
+        if suppressed:
+            parts.append(f"{suppressed} suppressed as already sent before V6")
+        if held:
+            parts.append(f"{held} held for legacy review")
+        parts += [f"{listed} listed below",
+                  f"{cards['already_recorded']} already queued or sent in an earlier run"]
+        lines.insert(0, f"\nJobs this run: {cards['eligible']} eligible; {', '.join(parts)}.")
+        lines[1] = lines[1].lstrip('\n')
+    # Reports staged before card accounting existed make no run-level claims.
     if overflow is None:
-        # Reports staged before the list existed carry only the count.
-        lines = [f"\nJobs this run: {eligible} eligible; {carded} carded above,{held_text} "
-                 f"{counts['already_recorded']} already sent earlier."]
-        if counts['overflow_cards']:
-            lines.append(f"{counts['overflow_cards']} more eligible jobs are in the local run audit.")
+        if listed:
+            lines.append(f"{listed} more eligible jobs are in the local run audit.")
         return '\n'.join(lines) + '\n'
-    lines = [f"\nJobs this run: {eligible} eligible; {carded} carded above,{held_text} "
-             f"{counts['overflow_cards']} listed below, {counts['already_recorded']} already sent earlier."]
     if not overflow:
         return '\n'.join(lines) + '\n'
     lines += ['', 'Also eligible (not carded)', '']
@@ -139,14 +162,15 @@ def render_job_summary(ledger):
             continue
         per_employer[employer] = per_employer.get(employer, 0) + 1
         shown += 1
-        band = 'VERIFY' if entry.get('band') == 'verify' else entry.get('band', '').upper()
-        lines.append(f"• {band} | {entry.get('title')} | {employer} · {entry.get('host')} "
-                     f"({entry.get('source') or 'source unknown'}) {entry.get('url')}")
+        where = (f"{entry['host']} ({entry.get('source') or 'source unknown'}) {entry['url']}"
+                 if entry.get('url') else f"({entry.get('source') or 'source unknown'}) URL unavailable")
+        lines.append(f"• {str(entry.get('band') or '').upper()} | {entry.get('title')} | "
+                     f"{employer} · {where}")
     for employer, number in hidden.items():
         if employer in per_employer:
             lines.append(f"+ {number} more from {employer}")
     others = sum(n for e, n in hidden.items() if e not in per_employer)
-    unlisted = counts['overflow_cards'] - len(overflow)
+    unlisted = listed - len(overflow)
     if others or unlisted:
         lines.append(f"+ {others + unlisted} more eligible jobs in the local run audit")
     return '\n'.join(lines) + '\n'
@@ -260,7 +284,14 @@ class DigestTransport:
                 if (any(type(coverage.get(k)) is not int or coverage[k]<0 for k in ('total',*keys))
                         or coverage['total'] != sum(coverage[k] for k in keys)):
                     raise ValueError('coverage summary ledger does not reconcile')
-                body += render_job_summary(ledger)
+                card_states = {}
+                for intent in ledger.get('card_intent_ids', []):
+                    row = self.conn.execute('SELECT status FROM delivery_intents WHERE id=?',
+                                            (intent,)).fetchone()
+                    if row is not None:
+                        card_states[row[0]] = card_states.get(row[0], 0) + 1
+                carded_here = sum(is_card_payload(json.loads(row['payload'])) for row in rows)
+                body += render_job_summary(ledger, carded_here=carded_here, card_states=card_states)
                 body += (f"\nSource-health audit ({summary_run_id}): {coverage['total']} source scopes "
                          f"(data sources, not jobs); {coverage['unchanged_or_healthy']} healthy/unchanged, "
                          f"{coverage['already_recorded']} already reported, {coverage['selected']} shown above, "

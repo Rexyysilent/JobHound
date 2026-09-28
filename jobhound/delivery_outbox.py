@@ -605,7 +605,7 @@ def overflow_entry(item):
 
 
 def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_cap):
-    from .v41.digest import build_digest
+    from .v41.digest import build_digest, release_order_key
     from .v41.provenance import sanitize_payload
     if not outbox.conn.in_transaction:
         raise RuntimeError('run and delivery must share a transaction')
@@ -638,10 +638,13 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
         elif item.canonical.outcome_projection is not None:
             statuses.append(item)
     ledgers = []
+    entries = {}                    # overflow lines are built once, shared by destinations
+    active_ids = {item.canonical.canonical_id for item in active}
     for target in targets:
         counts = {'total': len(rows), 'ineligible': len(rows)-len(active)-len(statuses),
                   'already_recorded': 0, 'policy_review': 0, 'selected_cards': 0,
                   'selected_status': 0, 'overflow_cards': 0, 'overflow_status': 0}
+        cards_already = 0           # 'already_recorded' also counts status items
         available = []
         policy_changed = 0          # informational; 'policy_review' counts holds (none now)
         for item in [*active,*statuses]:
@@ -653,10 +656,10 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                 policy_changed += 1
             if exists:
                 counts['already_recorded'] += 1
+                cards_already += item.canonical.canonical_id in active_ids
             else:
                 available.append(item)
-        active_ids = {item.canonical.canonical_id for item in active}
-        cards = [item for item in available if item.canonical.canonical_id in active_ids]
+        cards =[item for item in available if item.canonical.canonical_id in active_ids]
         status_items = [item for item in available if item.canonical.canonical_id not in active_ids]
         # Reuse the real digest's quality, company/platform and top-N controls.
         # A transport cap may reduce the preview, never expand its per-band limits.
@@ -687,12 +690,19 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
         # digest's own order) so the email never drops them silently.
         shown = {item.canonical.canonical_id for item in selected}
         overflow = sorted((item for item in cards if item.canonical.canonical_id not in shown),
-                          key=lambda row: (0 if row.decision.action_band.value == 'primary' else 1,
-                                           *row.decision.priority_key.sort_tuple))
+                          key=release_order_key)[:OVERFLOW_LIST_LIMIT]
+        for item in overflow:
+            if item.canonical.canonical_id not in entries:
+                entries[item.canonical.canonical_id] = overflow_entry(item)
         ledgers.append({'channel':target.channel,'destination':target.key,
                         'counts':counts,'states':states,'intent_ids':intent_ids,
                         'policy_changed':policy_changed,
-                        'overflow':[overflow_entry(item) for item in overflow[:OVERFLOW_LIST_LIMIT]]})
+                        # Card-only accounting for the email summary; the renderer
+                        # reads these intents' statuses when it freezes the email.
+                        'cards':{'eligible':len(active),'already_recorded':cards_already,
+                                 'selected':len(selected),'listed':len(cards)-len(selected)},
+                        'card_intent_ids':intent_ids[:len(selected)],
+                        'overflow':[entries[item.canonical.canonical_id] for item in overflow]})
     # Operational state has a separate capped stream and denominator, not fake jobs.
     health_revisions = []
     seen_scopes = set()
