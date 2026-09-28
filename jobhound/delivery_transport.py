@@ -107,6 +107,51 @@ def render_envelope(rows):
     return '\n'.join(lines)
 
 
+OVERFLOW_PER_EMPLOYER = 5
+OVERFLOW_EMAIL_LINES = 40
+
+
+def render_job_summary(ledger):
+    """Jobs line plus the eligible cards the digest caps left out, grouped by employer."""
+    counts, states = ledger['counts'], ledger.get('states', {})
+    held = states.get('legacy_hold', 0)
+    overflow = ledger.get('overflow')
+    eligible = counts['selected_cards'] + counts['overflow_cards'] + counts['already_recorded']
+    carded = counts['selected_cards'] - held
+    held_text = f" {held} held for legacy-duplicate review," if held else ''
+    if overflow is None:
+        # Reports staged before the list existed carry only the count.
+        lines = [f"\nJobs this run: {eligible} eligible; {carded} carded above,{held_text} "
+                 f"{counts['already_recorded']} already sent earlier."]
+        if counts['overflow_cards']:
+            lines.append(f"{counts['overflow_cards']} more eligible jobs are in the local run audit.")
+        return '\n'.join(lines) + '\n'
+    lines = [f"\nJobs this run: {eligible} eligible; {carded} carded above,{held_text} "
+             f"{counts['overflow_cards']} listed below, {counts['already_recorded']} already sent earlier."]
+    if not overflow:
+        return '\n'.join(lines) + '\n'
+    lines += ['', 'Also eligible (not carded)', '']
+    per_employer, hidden, shown = {}, {}, 0
+    for entry in overflow:
+        employer = entry.get('company') or entry.get('host') or 'unknown employer'
+        if per_employer.get(employer, 0) >= OVERFLOW_PER_EMPLOYER or shown >= OVERFLOW_EMAIL_LINES:
+            hidden[employer] = hidden.get(employer, 0) + 1
+            continue
+        per_employer[employer] = per_employer.get(employer, 0) + 1
+        shown += 1
+        band = 'VERIFY' if entry.get('band') == 'verify' else entry.get('band', '').upper()
+        lines.append(f"• {band} | {entry.get('title')} | {employer} · {entry.get('host')} "
+                     f"({entry.get('source') or 'source unknown'}) {entry.get('url')}")
+    for employer, number in hidden.items():
+        if employer in per_employer:
+            lines.append(f"+ {number} more from {employer}")
+    others = sum(n for e, n in hidden.items() if e not in per_employer)
+    unlisted = counts['overflow_cards'] - len(overflow)
+    if others or unlisted:
+        lines.append(f"+ {others + unlisted} more eligible jobs in the local run audit")
+    return '\n'.join(lines) + '\n'
+
+
 class DigestTransport:
     def __init__(self, outbox):
         self.box, self.conn = outbox, outbox.conn
@@ -215,11 +260,13 @@ class DigestTransport:
                 if (any(type(coverage.get(k)) is not int or coverage[k]<0 for k in ('total',*keys))
                         or coverage['total'] != sum(coverage[k] for k in keys)):
                     raise ValueError('coverage summary ledger does not reconcile')
-                body += (f"\nRun coverage audit ({summary_run_id}): {coverage['total']} source scopes; "
-                         f"{coverage['unchanged_or_healthy']} healthy/unchanged, {coverage['already_recorded']} already recorded, "
-                         f"{coverage['selected']} staged, {coverage['overflow']} deferred by the status cap, "
+                body += render_job_summary(ledger)
+                body += (f"\nSource-health audit ({summary_run_id}): {coverage['total']} source scopes "
+                         f"(data sources, not jobs); {coverage['unchanged_or_healthy']} healthy/unchanged, "
+                         f"{coverage['already_recorded']} already reported, {coverage['selected']} shown above, "
+                         f"{coverage['overflow']} deferred by the status cap, "
                          f"{coverage['policy_review']} held for policy review.\n"
-                         "Deferred/held updates are not individually delivered here; full details remain in the local run audit.\n")
+                         "Deferred/held source updates are not individually delivered here; full details remain in the local run audit.\n")
             if len(body.encode()) > 128 * 1024:
                 raise ValueError('digest exceeds 128 KiB; select fewer intents')
             if destination.channel == 'telegram':

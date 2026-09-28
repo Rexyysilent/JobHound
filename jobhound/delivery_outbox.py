@@ -589,6 +589,21 @@ def evaluated_row(item):
             'outcome_projection': item.canonical.outcome_projection.model_dump(mode='json') if item.canonical.outcome_projection else None}
 
 
+OVERFLOW_LIST_LIMIT = 200
+
+
+def overflow_entry(item):
+    """One display-safe line of an eligible card that was not carded."""
+    from urllib.parse import urlsplit
+    from .v41.provenance import public_url, sanitize_payload
+    url = public_url(item.job.url)
+    return sanitize_payload({'title': item.job.title or '', 'company': item.job.company or '',
+                             'host': (urlsplit(url).hostname or '') if url else '', 'url': url,
+                             'band': item.decision.action_band.value,
+                             'source': str(getattr(item.assessment.source_actionability, 'value',
+                                                   item.assessment.source_actionability) or '')})
+
+
 def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_cap):
     from .v41.digest import build_digest
     from .v41.provenance import sanitize_payload
@@ -668,9 +683,16 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                    ORDER BY id DESC LIMIT 1''',
                 (revision, target.channel, target.key),
             ).fetchone()[0])
+        # Eligible cards the digest did not show stay listed (compactly, in the
+        # digest's own order) so the email never drops them silently.
+        shown = {item.canonical.canonical_id for item in selected}
+        overflow = sorted((item for item in cards if item.canonical.canonical_id not in shown),
+                          key=lambda row: (0 if row.decision.action_band.value == 'primary' else 1,
+                                           *row.decision.priority_key.sort_tuple))
         ledgers.append({'channel':target.channel,'destination':target.key,
                         'counts':counts,'states':states,'intent_ids':intent_ids,
-                        'policy_changed':policy_changed})
+                        'policy_changed':policy_changed,
+                        'overflow':[overflow_entry(item) for item in overflow[:OVERFLOW_LIST_LIMIT]]})
     # Operational state has a separate capped stream and denominator, not fake jobs.
     health_revisions = []
     seen_scopes = set()
