@@ -170,9 +170,14 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     text = job.description.casefold()
     cost = state.get('action_cost') if isinstance(state.get('action_cost'), dict) else {}
     cash = cost.get('cash_required')
-    # Upwork Connects are a counted bid currency ("16 Connects"); the bare verb
-    # ("Mercor connects talent with labs") is company boilerplate, not a cost.
-    high_effort = bool(re.search(r'\b(?:90|120)\s*(?:min|minute)|\b(?:paid\s+(?:test|bid)|lengthy\s+(?:test|assessment)|\d+\s+connects)\b', text))
+    # Upwork Connects are a counted bid currency in Upwork's own wordings
+    # ("16 Connects", "1 Connect", "Connects: 16", "Required Connects to submit
+    # a proposal"); the bare verb ("Mercor connects talent with labs") is
+    # company boilerplate, not a cost.
+    connects_cost = (r'\d+\s+connects?|connects?\s*:\s*\d+|required\s+connects?'
+                     r'|connects?\s+(?:to|required\s+to|needed\s+to)\s+(?:submit|apply|bid|send)')
+    high_effort = bool(re.search(r'\b(?:90|120)\s*(?:min|minute)|\b(?:paid\s+(?:test|bid)|lengthy\s+(?:test|assessment)|'
+                                 + connects_cost + r')\b', text))
     assessment.action_cost_known = cash is not None
     assessment.action_cost_acceptable = cash == 0 or (cash is None and not marketplace and not high_effort)
     if cash is not None and cash > 0:

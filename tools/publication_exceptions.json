@@ -184,5 +184,17 @@
     "kind": "credential_assignment",
     "sha256": "798aba71d8ab3b398999e659a8f59900149d26056c472e43973ec2529d643d7d",
     "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "jobhound/v41/documents.py",
+    "kind": "home_path",
+    "sha256": "f82e38ea2f1701b23da51429e7753ec7e80aa574ad3ce8c3fe300ec47d1643db",
+    "reason": "Reviewed: Upwork's legacy public profile route (the o/profiles route), not a local home directory."
+  },
+  {
+    "path": "tests/test_v6_thin_digest_review.py",
+    "kind": "home_path",
+    "sha256": "c220dbe27040c207a5b95bd82acf1c569fbb3ac8984789a8205b466aae2055aa",
+    "reason": "Reviewed: Upwork's legacy public profile route (the o/profiles route), not a local home directory."
   }
 ]

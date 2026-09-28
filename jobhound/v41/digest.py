@@ -589,6 +589,11 @@ def _release_entry(item: EvaluatedJob) -> str:
     return '\n'.join(lines)
 
 
+def release_order_key(row):
+    """V5.5 digest order: primary before verify, then the decision's priority key."""
+    return (0 if row.decision.action_band == ActionBand.PRIMARY else 1, *row.decision.priority_key.sort_tuple)
+
+
 def _build_release_digest(result, *, items, include_all, top_n, per_company_cap, per_platform_cap, alerts):
     surfaced = [row for row in result.evaluated if row.decision.action_band != ActionBand.REJECT]
     requested_ids = {row.canonical.canonical_id for row in items} if items is not None else None
@@ -601,7 +606,7 @@ def _build_release_digest(result, *, items, include_all, top_n, per_company_cap,
     band_count = Counter()
     company_cap = CONFIG.v55.max_per_employer if per_company_cap is None else per_company_cap
     marketplace_cap = CONFIG.v55.max_per_marketplace if per_platform_cap is None else per_platform_cap
-    for item in sorted(surfaced, key=lambda row: (0 if row.decision.action_band == ActionBand.PRIMARY else 1, *row.decision.priority_key.sort_tuple)):
+    for item in sorted(surfaced, key=release_order_key):
         if item.decision.lifecycle != 'active':
             key = 'suppressed_known_state' if item.assessment.lifecycle_reason in {'known_account_block', 'application_already_submitted'} else 'suppressed_watch'
             counts[key] += 1
