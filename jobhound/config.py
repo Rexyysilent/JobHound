@@ -299,6 +299,11 @@ class EmailIngestCfg(BaseModel):
     host: str = "imap.gmail.com"
     folder: str = "JobHound"
     sender_platform_map: dict[str, str] = Field(default_factory=dict)
+    # Platform trust needs an authenticated sender, not just a From header:
+    # DMARC or aligned DKIM pass in the topmost Authentication-Results header
+    # added by one of these receiving servers.
+    require_sender_auth: bool = True
+    trusted_authserv_ids: list[str] = Field(default_factory=lambda: ["mx.google.com"])
 
 
 class ProductionFetchCfg(BaseModel):
