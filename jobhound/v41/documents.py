@@ -101,7 +101,10 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
     if host == "upwork.com" or host.endswith(".upwork.com"):
         if path == "/services/product" or path.startswith("/services/product/"):
             return DocumentClassification("seller_service", "non_opportunity", "seller", False, ("seller_catalogue_route",))
-        if path == "/hire" or path.startswith("/hire/"):
+        # A freelancer's own profile advertises a seller, not buyer demand.
+        if path.startswith("/freelancers/~") or path.startswith("/fl/"):
+            return DocumentClassification("seller_service", "non_opportunity", "seller", False, ("seller_profile_route",))
+        if path == "/hire" or path.startswith("/hire/") or path == "/freelancers":
             return DocumentClassification("talent_directory", "index", "buyer_browsing", False, ("talent_directory_route",))
         if path.startswith("/freelance-jobs/apply/") or re.fullmatch(r"/jobs/~[0-9]+", path):
             return DocumentClassification("buyer_request", "individual_request", "buyer", True, ("individual_buyer_route",))
