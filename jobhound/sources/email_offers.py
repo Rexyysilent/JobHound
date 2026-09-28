@@ -12,6 +12,9 @@ inside the folder are ignored (safe default).
 
 Security note: email content is untrusted data — parsed with regex only,
 never executed; the digest links only to the platform's own offer links.
+The From header is spoofable, so platform trust also requires the receiving
+provider's topmost Authentication-Results to show DMARC or aligned DKIM pass
+for the configured platform domain; unauthenticated mail is ignored.
 
 NOTE: like the rest of the pipeline, a --dry-run still marks UIDs processed.
 """
@@ -20,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import email
 import email.policy
+import email.utils
 import imaplib
 import logging
 import re
@@ -143,29 +147,78 @@ def _plain_text(msg: email.message.EmailMessage) -> str:
 
 
 def _sender_domain(from_addr: str) -> str:
-    return from_addr.split("@")[-1].lower().strip(">").strip()
+    return email.utils.parseaddr(from_addr)[1].rpartition("@")[2].lower().strip()
 
 
-def _sender_platform(from_addr: str, mapping: dict[str, str]) -> str | None:
+def _within(host: str, domain: str) -> bool:
+    host, domain = host.lower().rstrip("."), domain.lower().rstrip(".")
+    return host == domain or host.endswith("." + domain)
+
+
+def _match_sender(from_addr: str, mapping: dict[str, str]) -> tuple[str, str] | None:
+    """-> (platform key, configured platform domain) for a mapped sender."""
     dom = _sender_domain(from_addr)
     for known, key in mapping.items():
-        if dom == known or dom.endswith("." + known):
-            return key
+        if dom and _within(dom, known):
+            return key, known.lower()
     return None
 
 
-def _platform_link(body: str, sender_dom: str) -> str:
-    """First link pointing back at the platform's own domain; else its homepage.
-    (HANDOFF §10: we link to originals — never to anything else in the mail.)"""
-    root = ".".join(sender_dom.split(".")[-2:])
+_RESULT_RE = re.compile(r"\b(dmarc|dkim)\s*=\s*(\w+)([^;]*)", re.I)
+_PROP_RE = re.compile(r"\bheader\.(from|d|i)\s*=\s*@?([A-Za-z0-9.-]+)", re.I)
+
+
+def _sender_authenticated(msg, platform_domain: str, trusted: tuple[str, ...] | list[str]) -> bool:
+    """DMARC pass or aligned DKIM pass, read from the TOPMOST
+    Authentication-Results header (the one the receiving provider added; a
+    sender can plant others further down) and only if a trusted receiving
+    server wrote it."""
+    headers = msg.get_all("Authentication-Results") or []
+    if not headers:
+        return False
+    top = re.sub(r"\s+", " ", str(headers[0])).strip()
+    authserv_id = top.split(";", 1)[0].split()[0].lower() if top else ""
+    if authserv_id not in {t.lower() for t in trusted}:
+        return False
+    for method, result, props in _RESULT_RE.findall(top):
+        if result.lower() != "pass":
+            continue
+        for name, value in _PROP_RE.findall(props):
+            if method.lower() == "dmarc" and name.lower() == "from" and _within(value, platform_domain):
+                return True
+            if method.lower() == "dkim" and name.lower() in {"d", "i"} and _within(value, platform_domain):
+                return True
+    return False
+
+
+def _platform_link(body: str, platform_domain: str) -> str:
+    """First link on the configured platform domain (or a subdomain); else its
+    homepage. (HANDOFF §10: we link to originals — never to anything else in
+    the mail.) The configured domain is used as-is: taking the sender's last
+    two labels turned alerts.example.co.uk into "co.uk"."""
     for m in _LINK_RE.finditer(body):
         try:
-            host = m.group(0).split("/")[2].lower()
+            host = m.group(0).split("/")[2].lower().split(":")[0]
         except IndexError:
             continue
-        if host == root or host.endswith("." + root):
+        if _within(host, platform_domain):
             return m.group(0)
-    return f"https://{root}"
+    return f"https://{platform_domain}"
+
+
+def offer_from_message(msg, mapping: dict[str, str], *, require_auth: bool,
+                       trusted: tuple[str, ...] | list[str]) -> tuple[dict | None, str]:
+    """One message -> (offer or None, reason: accepted / unknown_sender / unauthenticated)."""
+    matched = _match_sender(str(msg.get("From", "")), mapping)
+    if matched is None:
+        return None, "unknown_sender"
+    platform, platform_domain = matched
+    if require_auth and not _sender_authenticated(msg, platform_domain, trusted):
+        return None, "unauthenticated"
+    body = _plain_text(msg)
+    offer = parse_offer(str(msg.get("Subject", "")), body)
+    offer.update(platform_key=platform, url=_platform_link(body, platform_domain))
+    return offer, "accepted"
 
 
 # --------------------------------------------------------------- IMAP source
@@ -202,6 +255,7 @@ class EmailOffersSource(Source):
                         cfg.folder)
                     return out
                 _, data = imap.uid("search", None, "ALL")
+                unauthenticated = 0
                 for uid in (data[0] or b"").split():
                     uid_s = uid.decode()
                     if store.email_uid_seen(uid_s):
@@ -209,19 +263,20 @@ class EmailOffersSource(Source):
                     _, msg_data = imap.uid("fetch", uid, "(RFC822)")
                     msg = email.message_from_bytes(
                         msg_data[0][1], policy=email.policy.default)
-                    from_addr = str(msg.get("From", ""))
-                    platform = _sender_platform(from_addr, cfg.sender_platform_map)
-                    if platform is None:      # unknown sender in folder -> ignore
-                        store.mark_email_uid(uid_s)
-                        continue
-                    body = _plain_text(msg)
-                    offer = parse_offer(str(msg.get("Subject", "")), body)
-                    offer.update(
-                        platform_key=platform,
-                        url=_platform_link(body, _sender_domain(from_addr)),
+                    offer, reason = offer_from_message(
+                        msg, cfg.sender_platform_map,
+                        require_auth=cfg.require_sender_auth,
+                        trusted=cfg.trusted_authserv_ids,
                     )
-                    out.append(offer)
+                    if offer is not None:
+                        out.append(offer)
+                    elif reason == "unauthenticated":
+                        unauthenticated += 1
                     store.mark_email_uid(uid_s)
+                if unauthenticated:
+                    log.warning(
+                        "email_ingest: ignored %d message(s) claiming a platform sender "
+                        "without DMARC/aligned-DKIM pass (possible spoofing)", unauthenticated)
         finally:
             store.close()
         return out
