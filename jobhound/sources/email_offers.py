@@ -27,6 +27,7 @@ import email.utils
 import imaplib
 import logging
 import re
+import ssl
 from html import unescape
 
 import httpx
@@ -245,7 +246,9 @@ class EmailOffersSource(Source):
         store = Store()
         out: list[dict] = []
         try:
-            with imaplib.IMAP4_SSL(cfg.host) as imap:
+            # imaplib's default context verifies neither the certificate nor
+            # the hostname, and login sends the mailbox app password.
+            with imaplib.IMAP4_SSL(cfg.host, ssl_context=ssl.create_default_context()) as imap:
                 imap.login(settings.imap_user_effective, settings.imap_password_effective)
                 typ, _ = imap.select(f'"{cfg.folder}"', readonly=True)
                 if typ != "OK":
