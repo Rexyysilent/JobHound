@@ -63,6 +63,16 @@ _REGION_LINE = re.compile(
     r"\s[-–—]\s*(usa|us|united states|uk|united kingdom|canada|australia|"
     r"germany|eu|emea|europe)\s*$"
 )
+# LinkedIn search titles: "<Company> hiring <Role> in <Location>[ - LinkedIn]".
+# Only a named non-India region counts; "in APAC", "in India" and a location
+# cut off as "in ..." do not.
+_HIRING_IN_TITLE = re.compile(
+    r"\bhiring\b.{3,160}?\bin\s+(?:the\s+)?"
+    r"(united states|usa|us|united kingdom|uk|canada|australia|germany|"
+    r"european union|eu|emea|europe|latam)"
+    r"\s*(?:[-|]\s*linkedin)?\s*$",
+    re.IGNORECASE,
+)
 _CONTENT_PATH = re.compile(r"/(blog|guide|article|news|resources)(?:/|$)", re.IGNORECASE)
 _CONTENT_TITLE = re.compile(r"^(?:how to|guide|tips)\b|\bhow to (?:find|get)\b", re.IGNORECASE)
 _NON_JOB_PUBLISHERS = {"ai supermarket"}
@@ -89,16 +99,53 @@ EMPLOYER_JOB_DOMAINS = {
 }
 _SECOND_LEVEL = {"co", "com", "org", "net", "gov", "ac", "edu"}
 
+# Every country other than India, plus common region/city names. A partial
+# hand-written list let "Zambia (Remote)" and "Malawi (Remote)" pass as
+# location-unknown (2026-10-02 email). Chad and Jordan are left out: both are
+# common first names in titles and team lines.
+_FOREIGN_PLACES = (
+    "afghanistan", "albania", "algeria", "andorra", "angola", "antigua and barbuda",
+    "argentina", "armenia", "australia", "austria", "azerbaijan", "bahamas", "bahrain",
+    "bangladesh", "barbados", "belarus", "belgium", "belize", "benin", "bhutan", "bolivia",
+    "bosnia", "botswana", "brazil", "brunei", "bulgaria", "burkina faso", "burundi",
+    "cabo verde", "cape verde", "cambodia", "cameroon", "canada", "central african republic",
+    "chile", "china", "colombia", "comoros", "congo", "costa rica", "cote d'ivoire",
+    "ivory coast", "croatia", "cuba", "cyprus", "czech republic", "czechia", "denmark",
+    "djibouti", "dominica", "dominican republic", "ecuador", "egypt", "el salvador",
+    "equatorial guinea", "eritrea", "estonia", "eswatini", "swaziland", "ethiopia", "fiji",
+    "finland", "france", "gabon", "gambia", "georgia", "germany", "ghana", "greece",
+    "grenada", "guatemala", "guinea", "guinea-bissau", "guyana", "haiti", "honduras",
+    "hungary", "iceland", "indonesia", "iran", "iraq", "ireland", "israel", "italy",
+    "jamaica", "japan", "kazakhstan", "kenya", "kiribati", "kosovo", "kuwait",
+    "kyrgyzstan", "laos", "latvia", "lebanon", "lesotho", "liberia", "libya",
+    "liechtenstein", "lithuania", "luxembourg", "madagascar", "malawi", "malaysia",
+    "maldives", "mali", "malta", "marshall islands", "mauritania", "mauritius", "mexico",
+    "micronesia", "moldova", "monaco", "mongolia", "montenegro", "morocco", "mozambique",
+    "myanmar", "burma", "namibia", "nauru", "nepal", "netherlands", "new zealand",
+    "nicaragua", "niger", "nigeria", "north korea", "north macedonia", "macedonia", "norway",
+    "oman", "pakistan", "palau", "palestine", "panama", "papua new guinea", "paraguay",
+    "peru", "philippines", "poland", "portugal", "qatar", "romania", "russia", "rwanda",
+    "saint lucia", "samoa", "san marino", "saudi arabia", "senegal", "serbia", "seychelles",
+    "sierra leone", "singapore", "slovakia", "slovenia", "solomon islands", "somalia",
+    "south africa", "south korea", "korea", "south sudan", "spain", "sri lanka", "sudan",
+    "suriname", "sweden", "switzerland", "syria", "taiwan", "tajikistan", "tanzania",
+    "thailand", "timor-leste", "east timor", "togo", "tonga", "trinidad and tobago",
+    "tunisia", "turkey", "turkiye", "turkmenistan", "tuvalu", "uganda", "ukraine",
+    "united arab emirates", "uae", "united kingdom", "uk", "england", "scotland", "wales",
+    "united states", "usa", "uruguay", "uzbekistan", "vanuatu", "vatican", "venezuela",
+    "vietnam", "yemen", "zambia", "zimbabwe", "hong kong", "macau", "puerto rico",
+    "dubai", "abu dhabi", "europe", "eu", "emea", "latam", "latin america",
+)
 _FOREIGN_LOCATION = re.compile(
-    r"\b(?:bangladesh|pakistan|sri lanka|nepal|bhutan|maldives|"
-    r"united states|usa|u\.s\.|canada|mexico|brazil|argentina|"
-    r"united kingdom|uk|ireland|germany|france|spain|italy|portugal|"
-    r"netherlands|belgium|switzerland|austria|poland|romania|"
-    r"latvia|lithuania|estonia|europe|eu|emea|"
-    r"algeria|south africa|nigeria|kenya|morocco|egypt|"
-    r"china|taiwan|hong kong|japan|south korea|singapore|malaysia|"
-    r"indonesia|philippines|vietnam|thailand|australia|new zealand|"
-    r"united arab emirates|uae|dubai|abu dhabi|chile|israel|norway|peru)\b",
+    r"\b(?:" + "|".join(re.escape(p) for p in sorted(_FOREIGN_PLACES, key=len, reverse=True))
+    + r")\b|\bu\.s\.",
+    re.IGNORECASE,
+)
+# "Worldwide (excluding Cuba, Iran, ...)", "Remote, except Iran": excluded
+# countries are not where the job is.
+_EXCLUSION_CLAUSE = re.compile(
+    r"\b(?:excluding|excludes|except(?:\s+for)?|excl\.|not\s+(?:available|open)\s+(?:in|to))"
+    r"[^)\n]*",
     re.IGNORECASE,
 )
 _INDIA_LOCATION = re.compile(
@@ -187,6 +234,9 @@ def absurd_language_check(title: str) -> list[str]:
 def region_lock_check(title: str, description: str = "", *, polarity_aware: bool = False) -> list[str]:
     """Reject explicit non-India country locks even when a job says remote."""
     text = f"{title}\n{(description or '')[:600]}"
+    titled = _HIRING_IN_TITLE.search(title.strip())
+    if titled:
+        return [f"region_locked:{titled.group(1).lower()}"]
     for pattern in (
         _REGION_PAREN, _REGION_PHRASE, _REGION_CITY_COUNTRY, _REGION_LINE
     ):
@@ -268,7 +318,8 @@ def location_gate(is_remote: bool, region_tags: list[str],
         line.strip() for line in (description or "")[:1200].splitlines()
         if re.search(r"\b(?:location|workplace|work location)\s*:", line, re.I)
     )
-    explicit_text = f"{normalized_location}\n{normalized_title}\n{location_lines}"
+    explicit_text = _EXCLUSION_CLAUSE.sub(
+        "", f"{normalized_location}\n{normalized_title}\n{location_lines}")
     if _EXPLICIT_ONSITE.search(explicit_text):
         return ["rejected_location:onsite_or_hybrid"]
     if _FOREIGN_LOCATION.search(explicit_text) and not _INDIA_LOCATION.search(explicit_text):

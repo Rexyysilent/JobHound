@@ -624,6 +624,17 @@ async def hydrate_result(
         if item.assessment.account_state.get("new_material_evidence"):
             budget.verification_cycles.pop(key, None)
             budget.verification_next_check.pop(key, None)
+            budget.verification_first_failed.pop(key, None)
+    # History written before first-failure times were kept: estimate from the
+    # scheduled recheck (last failure + watch_days), less one weekly recheck
+    # per cycle beyond max_cycles and one daily run for the first cycle,
+    # rather than restarting every old failure's clock at once.
+    for key, cycles in budget.verification_cycles.items():
+        if cycles and key not in budget.verification_first_failed:
+            next_ts = budget.verification_next_check.get(key)
+            rechecks = max(0, cycles - max_cycles)
+            budget.verification_first_failed[key] = (
+                next_ts - (watch_days * (1 + rechecks) + 1) * 86400 if next_ts else as_of_ts)
     eligible = [
         item for item in result.evaluated
         if item.job.url
@@ -731,14 +742,19 @@ async def hydrate_result(
         budget.verification_cycles[cycle_key] = cycles
         if accepted:
             budget.verification_next_check.pop(cycle_key, None)
-        elif cycles >= max_cycles:
+            budget.verification_first_failed.pop(cycle_key, None)
+        else:
+            budget.verification_first_failed.setdefault(cycle_key, result.metadata.as_of.timestamp())
+        if not accepted and cycles >= max_cycles:
             budget.verification_next_check[cycle_key] = (
                 result.metadata.as_of + timedelta(days=watch_days)
             ).timestamp()
         cycle_state[parent.observation_id] = {
             "verification_cycles": cycles,
             "automatic_retry_allowed": cycles < max_cycles,
-            "route": "watch" if cycles >= max_cycles else "verify",
+            # Retries pause; whether the job leaves the daily list depends on
+            # its age (action_policy), so this is not a watch routing.
+            "route": "retry_paused" if cycles >= max_cycles else "verify",
         }
         if not accepted:
             continue
@@ -758,6 +774,7 @@ async def hydrate_result(
         if not cycles:
             continue
         next_ts = budget.verification_next_check.get(key)
+        first_failed = budget.verification_first_failed.setdefault(key, result.metadata.as_of.timestamp())
         marker = hashlib.sha256(key.encode()).hexdigest()[:16]
         observation_id = f"account:verification:{marker}:{cycles}"
         if any(obs.observation_id == observation_id for obs in result.observations):
@@ -770,6 +787,8 @@ async def hydrate_result(
             captured_at=result.metadata.as_of,
             raw_payload={
                 "automatic_verification_cycles": cycles,
+                "first_failed_verification_at": datetime.fromtimestamp(
+                    first_failed, result.metadata.as_of.tzinfo).isoformat(),
                 "observed_at": result.metadata.as_of.isoformat(),
                 "next_check_at": (
                     datetime.fromtimestamp(next_ts, result.metadata.as_of.tzinfo).isoformat()

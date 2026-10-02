@@ -105,6 +105,7 @@ class RetrievalBudget:
         self.cache: dict[str, dict] = {}
         self.verification_cycles: dict[str, int] = {}
         self.verification_next_check: dict[str, float] = {}
+        self.verification_first_failed: dict[str, float] = {}
         if self.review_namespace:
             self.review_namespace.mkdir(parents=True, exist_ok=True)
             state = self.review_namespace / "retrieval_state.json"
@@ -115,6 +116,7 @@ class RetrievalBudget:
                     self.cache = dict(saved.get("cache", {}))
                     self.verification_cycles = {str(k): int(v) for k, v in saved.get("verification_cycles", {}).items()}
                     self.verification_next_check = {str(k): float(v) for k, v in saved.get("verification_next_check", {}).items()}
+                    self.verification_first_failed = {str(k): float(v) for k, v in saved.get("verification_first_failed", {}).items()}
                 except (ValueError, TypeError, OSError):
                     pass
 
@@ -126,6 +128,9 @@ class RetrievalBudget:
             "cooldown_until": self.cooldown_until, "cache": self.cache,
             "verification_cycles": self.verification_cycles,
             "verification_next_check": self.verification_next_check,
+            # Only keys that still have failure history.
+            "verification_first_failed": {k: v for k, v in self.verification_first_failed.items()
+                                          if self.verification_cycles.get(k)},
         }, ensure_ascii=False, sort_keys=True), encoding="utf-8")
 
     async def acquire(self, url: str) -> asyncio.Semaphore:

@@ -89,7 +89,9 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     complete = [o for o in matched if o.content_state in {'complete', 'role_complete'} and not o.truncated]
     checks = [timestamp(o.verified_open_at) for o in matched if o.vacancy_state == 'verified_open']
     assessment.verified_open_at = max((x for x in checks if x and x <= now), default=None)
-    marketplace = job.platform_key == 'upwork' or 'upwork.com' in (urlsplit(job.url).hostname or '')
+    host = (urlsplit(job.url).hostname or '').casefold()
+    marketplace = job.platform_key == 'upwork' or host == 'upwork.com' or host.endswith('.upwork.com')
+    assessment.search_snippet_only = marketplace and not complete
     ttl = CONFIG.v55.marketplace_ttl_hours if marketplace else CONFIG.v55.verification_ttl_hours
     open_fresh = assessment.verified_open_at is not None and (now - assessment.verified_open_at).total_seconds() <= ttl * 3600
     closed = any(o.vacancy_state == 'explicitly_closed' and o.identity_state in {'exact', 'corroborated'} for o in observations)
@@ -133,16 +135,25 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     elif state.get('assessment_state') in {'completed', 'passed', 'submitted'}:
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'assessment_already_completed'
         assessment.next_action = 'await_response'
-    if attempts >= CONFIG.v55.max_automatic_cycles and not state.get('new_material_evidence'):
+    posted = timestamp(job.posted_at)
+    age = max(0, (now - posted).total_seconds() / 86400) if posted else None
+    # Some sources can never be checked automatically, so failed checks alone
+    # do not hide a job: it moves to watch once the posting is older than the
+    # watch age or, when undated, once its checks have failed for that long.
+    # Operator-recorded attempts carry no first-failure time; they count from
+    # when they were recorded.
+    first_failed = timestamp(state.get('first_failed_verification_at')) or (observed_at if attempts else None)
+    failing_days = max(0, (now - first_failed).total_seconds() / 86400) if first_failed else 0
+    watch_age = CONFIG.v55.exhausted_watch_age_days
+    old_enough = age > watch_age if age is not None else failing_days > watch_age
+    if attempts >= CONFIG.v55.max_automatic_cycles and not state.get('new_material_evidence') and old_enough:
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'verification_exhausted'
 
     authoritative = any(o.source_kind in {SourceKind.ORIGINAL_ATS, SourceKind.ORIGINAL_EMPLOYER, SourceKind.EMAIL_OFFER} and o in complete for o in observations)
-    posted = timestamp(job.posted_at)
-    age = max(0, (now - posted).total_seconds() / 86400) if posted else None
     thin_copy = not authoritative
     if thin_copy and age is not None and age > CONFIG.v55.unresolved_copy_max_age_days:
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'stale_unresolved_copy'
-    elif thin_copy and age is None and attempts >= 1:
+    elif thin_copy and age is None and attempts >= 1 and old_enough:
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'undated_copy_verification_exhausted'
     if age is not None:
         half_life = CONFIG.ranking.easy_entry_half_life_days if assessment.easy_entry else CONFIG.ranking.freshness_half_life_days

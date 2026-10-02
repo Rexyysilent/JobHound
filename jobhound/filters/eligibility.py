@@ -217,18 +217,44 @@ _UNKNOWN_LANGUAGE_ROLE = re.compile(
     r"\s*[-–—|:]\s*(?P<language>[a-z][a-z '\-]{1,35}?)"
     r"\s*[-–—|:]\s*(?:remote|contract|freelance|part[- ]?time|full[- ]?time)\b"
 )
+# LILT-style language roles: "Linguist/Transcriber - Chichewa/Nyanja - Remote",
+# "Linguist - Shona - UI Technical / Marketing - Remote", "Content Writer -
+# Chichewa - Remote". The slot may list alternatives and be followed by any
+# further title part.
+_LANGUAGE_ROLE_NOUN = r"(?:linguists?|transcribers?|translators?|(?:content\s+)?writers?|voice\s+talent)"
+_LANGUAGE_WORK_ROLE = re.compile(
+    rf"(?ix)^\s*{_LANGUAGE_ROLE_NOUN}(?:\s*/\s*{_LANGUAGE_ROLE_NOUN})*"
+    r"\s*[-–—|:]\s*(?P<language>[a-z][a-z '/]{1,40}?)\s*(?:[-–—|:(]|$)"
+)
 _NON_LANGUAGE_SLOT = {"all genders", "worldwide", "global", "india", "united states", "quality", "content", "data", "remote"}
+# Words that mark a title slot as something other than a language name.
+_NON_LANGUAGE_WORDS = {
+    "ui", "ux", "technical", "marketing", "quality", "content", "data", "remote",
+    "legal", "medical", "financial", "finance", "general", "senior", "junior",
+    "lead", "contract", "freelance", "part", "full", "time", "worldwide", "global",
+    "all", "genders", "india", "united", "states", "audio", "video", "voice", "male",
+    "female", "native", "bilingual", "multilingual", "project", "team", "and",
+}
 
 
 def _title_unknown_language_requirements(title: str, known: set[str]) -> set[str]:
     """Read a bound target-language slot without relying on a finite catalog."""
-    match = _UNKNOWN_LANGUAGE_ROLE.search(_gate_text(title))
+    text = _gate_text(title)
+    match = _UNKNOWN_LANGUAGE_ROLE.search(text) or _LANGUAGE_WORK_ROLE.search(text)
     if match is None:
         return set()
-    value = re.sub(r"\s+", " ", match.group("language")).strip(" -'")
-    if value in _NON_LANGUAGE_SLOT or value in known:
+    parts = [re.sub(r"\s+", " ", part).strip(" -'")
+             for part in match.group("language").split("/")]
+    parts = [part for part in parts if part]
+    if not parts or any(
+        part in _NON_LANGUAGE_SLOT or part in known or len(part.split()) > 2
+        or set(part.split()) & _NON_LANGUAGE_WORDS
+        for part in parts
+    ):
+        # A profile-known language, or not a language name at all: the
+        # catalog-based readers handle the former.
         return set()
-    return {value}
+    return set(parts)
 
 
 def _title_language_pairs(title: str, known: set[str]) -> set[str]:

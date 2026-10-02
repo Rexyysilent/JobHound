@@ -39,7 +39,7 @@ v55:
   production_approved: false
   # Full cards per band (the code default is 3). Eligible jobs beyond the
   # card limits are listed compactly under "Also eligible" in the email.
-  max_verify_actions: 8
+  max_verify_actions: 15
   account_states: []            # your own dated application/project states (optional)
   # One bounded HTTP budget per run, shared by discovery and page hydration.
   production_fetch:
@@ -57,7 +57,7 @@ delivery:
   production_approved: false
   workspace_id: jobhound
   profile_id: default
-  card_cap: 15
+  card_cap: 20
   status_cap: 5
   max_parts_per_run: 32
   max_envelopes_per_run: 4      # per destination: up to 3 safe retries + today's digest
