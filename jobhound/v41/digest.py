@@ -117,6 +117,37 @@ def _trust_line(item: EvaluatedJob) -> str:
     )
 
 
+_CURRENCY_SIGN = {'USD': '$', 'EUR': '€', 'GBP': '£', 'INR': '₹'}
+_UNIT_SUFFIX = {
+    'labor_hour': '/hour', 'hour': '/hour', 'labor_hour_equivalent': '/hour',
+    'output_audio_hour': '/audio hour', 'output_audio_minute': '/audio minute',
+    'fixed': ' fixed', 'fixed_project': ' fixed', 'year': '/year', 'month': '/month',
+    'week': '/week', 'day': '/day', 'task': '/task', 'word': '/word',
+}
+
+
+def _amount_text(selected) -> str | None:
+    """The parsed amount ("$18/hour", "$22–70/hour"), not the matched sentence."""
+    low, high = selected.amount_low, selected.amount_high
+    if low is None and high is None:
+        return None
+    sign = _CURRENCY_SIGN.get((selected.currency or '').upper())
+
+    def number(v):
+        # Fixed point: ":g" turns 1,200,000 (12 LPA) into "1.2e+06".
+        return f"{v:,.2f}".rstrip('0').rstrip('.')
+
+    money = (lambda v: f"{sign}{number(v)}") if sign else (lambda v: f"{selected.currency or ''} {number(v)}".strip())
+    if low is None or high is None or low == high:
+        amount = money(low if low is not None else high)
+    else:
+        amount = f"{money(low)}–{number(high)}"
+    if selected.up_to:
+        amount = 'up to ' + amount
+    unit = selected.actual_unit or selected.basis
+    return amount + _UNIT_SUFFIX.get(unit, _UNIT_SUFFIX.get(selected.basis, ''))
+
+
 def _pay_line(item: EvaluatedJob) -> str:
     selected = item.assessment.selected_pay
     if selected is None:
@@ -129,8 +160,18 @@ def _pay_line(item: EvaluatedJob) -> str:
             'labor_hour_equivalent': 'publisher-stated hourly equivalent (estimate)',
             'fixed': 'fixed project budget', 'fixed_project': 'fixed project budget',
         }.get(selected.basis, selected.basis.replace('_', ' '))
-        claim = selected.raw
-        authority = selected.observation_source_kind.value if selected.observation_source_kind else 'unknown'
+        # Lead with the parsed amount; keep the posting's own wording only when
+        # it is short enough to carry qualifiers ("up to", "depending on")
+        # rather than a whole description sentence.
+        amount = _amount_text(selected)
+        raw = ' '.join(selected.raw.split())
+        if amount is None:
+            claim = raw[:120]
+        elif len(raw) <= 100:
+            claim = f'{amount} — "{raw}"'
+        else:
+            claim = amount
+        authority =selected.observation_source_kind.value if selected.observation_source_kind else 'unknown'
         support = f"{authority}; source {selected.source_field}, observation {selected.observation_id}"
         caveat = '; allocated task confirmed' if item.assessment.action_readiness == 'allocated' else '; allocation not confirmed'
         if item.assessment.time_to_cash_days is None:
@@ -559,6 +600,11 @@ def build_digest(
 def _release_entry(item: EvaluatedJob) -> str:
     decision, assessment = item.decision, item.assessment
     lines = [f"• {decision.next_action.replace('_', ' ').upper()} | {item.job.title} | {item.job.company or 'Employer unverified'}"]
+    # Cards are also rendered from queued payloads (job, assessment, decision
+    # only), so read the stored flag rather than the canonical observations.
+    if assessment.search_snippet_only:
+        lines.append("  Only a search snippet was seen (Upwork blocks fetching the posting): "
+                     "check location limits and required tools on Upwork before bidding.")
     if decision.action_band == ActionBand.VERIFY:
         for task in decision.verification_tasks[:2]:
             lines.append(f"  Check: {task['missing_fact'].replace('_', ' ')} — {task['next_step']}")
@@ -584,7 +630,7 @@ def _release_entry(item: EvaluatedJob) -> str:
         lines.append('  Checked: current opening not verified.')
     # Exact stored priority components, not a second additive score.
     key = decision.priority_key
-    lines.append(f"  Ordering: readiness {key.action_readiness}, time-to-cash evidence {key.supported_time_to_cash:g}, action-cost evidence {key.action_cost_and_friction}, task fit {key.match_strength}/{key.role_priority}, economics evidence {key.economics_quality}, language edge {key.explicit_profile_language_edge}, source {key.source_actionability}, conservative trust {key.conservative_trust}, freshness {key.freshness}.")
+    lines.append(f"  Ordering: readiness {key.action_readiness}, time-to-cash evidence {key.supported_time_to_cash:g}, task fit {key.match_strength}/{key.role_priority}, action-cost evidence {key.action_cost_and_friction}, economics evidence {key.economics_quality}, language edge {key.explicit_profile_language_edge}, source {key.source_actionability}, conservative trust {key.conservative_trust}, freshness {key.freshness}.")
     lines.append(f"  {public_url(item.job.url)}")
     return '\n'.join(lines)
 

@@ -339,6 +339,9 @@ class V55Cfg(BaseModel):
     marketplace_ttl_hours: int = Field(default=24, gt=0)
     unresolved_copy_max_age_days: int = Field(default=30, gt=0)
     max_automatic_cycles: int = Field(default=2, ge=1)
+    # Failed automatic checks alone do not hide a job: it moves to watch only
+    # once the posting (or, undated, the first failed check) is this old.
+    exhausted_watch_age_days: int = Field(default=14, gt=0)
     watch_recheck_days: int = Field(default=7, gt=0)
     max_primary_actions: int = Field(default=5, ge=0)
     max_verify_actions: int = Field(default=3, ge=0)

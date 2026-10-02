@@ -160,11 +160,35 @@ def _exact_role_noun(term: str, text: str) -> bool:
     return re.search(rf"\b{re.escape(term)}s?\b", text, re.IGNORECASE) is not None
 
 
+_LANGUAGE_NAMES: tuple[object, frozenset[str]] = (None, frozenset())
+
+
+def _build_language_names(profile) -> frozenset[str]:
+    return frozenset(str(name).casefold() for name in (*profile.languages, *profile.known_languages))
+
+
+def _language_names() -> frozenset[str]:
+    """Cached per profile. A run context rebuilds its Profile on every call,
+    so the key is the run's profile JSON (or the cached default profile)."""
+    global _LANGUAGE_NAMES
+    from ..filters.eligibility import _default_profile, default_profile
+    from ..run_context import current_run
+    context = current_run()
+    key = ("run", context.profile_json) if context else ("default", id(_default_profile()))
+    if _LANGUAGE_NAMES[0] != key:
+        _LANGUAGE_NAMES = (key, _build_language_names(default_profile()))
+    return _LANGUAGE_NAMES[1]
+
+
 def _term_matches(concept: str, term: str, field_name: str, text: str) -> bool:
     if concept in _TITLE_ONLY_CONCEPTS and field_name != "title":
         return False
     if term in _GENERIC_ROLE_NOUNS:
         return _exact_role_noun(term, text)
+    if concept == "language_ai" and term.casefold() in _language_names():
+        # Language names match exactly: the fuzzy stem match read the place
+        # "West Bengal" as the language Bengali (2026-10-02 email).
+        return re.search(rf"\b{re.escape(term)}\b", text, re.IGNORECASE) is not None
     if concept == "language_ai" and term in _TITLE_ONLY_LANGUAGE_TERMS:
         return field_name == "title" and phrase_in_text(term, text)
     return phrase_in_text(term, text)

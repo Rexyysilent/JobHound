@@ -493,12 +493,14 @@ def test_isolated_failed_verification_cycles_route_to_watch_once_per_run(tmp_pat
     assert first["attempts"][0]["verification_cycles"] == 1
     assert first["attempts"][0]["route"] == "verify"
     assert second["attempts"][0]["verification_cycles"] == 2
-    assert second["attempts"][0]["route"] == "watch"
+    assert second["attempts"][0]["route"] == "retry_paused"
     assert second["attempts"][0]["automatic_retry_allowed"] is False
-    assert second_result.evaluated[0].decision.lifecycle == "watch"
+    # Retries stop, but a job whose checks started failing less than
+    # exhausted_watch_age_days ago stays visible (2026-09-30 breadth fix).
+    assert second_result.evaluated[0].decision.lifecycle == "active"
     assert third["requests"] == 0 and third["attempts"] == []
     assert third_result.evaluated[0].assessment.account_state["automatic_verification_cycles"] == 2
-    assert third_result.evaluated[0].decision.lifecycle == "watch"
+    assert third_result.evaluated[0].decision.lifecycle == "active"
 
     other = [{"source": "greenhouse", "raw": {"id": 2, "title": "Hindi Evaluator", "_company": "Other",
               "absolute_url": "https://boards.greenhouse.io/other/jobs/2", "content": "short"}}]

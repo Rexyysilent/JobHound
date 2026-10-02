@@ -11,6 +11,7 @@ import json
 import sqlite3
 import time
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 
 from .delivery_outbox import Destination, clock, transaction
@@ -70,7 +71,22 @@ def plan_dispatch(ready, current, *, limit):
     return older[:max(0, limit - 1)] + [current]
 
 
-def render_envelope(rows):
+def _subject_line(card_count, status_count, now):
+    """The first line, which becomes the email subject. Gmail silently dropped
+    the 2026-10-01 digest twice under the old fixed subject while the same body
+    with any other subject arrived, so each day's subject is distinct."""
+    # The machine's fixed UTC offset: Windows cannot localise tiny test epochs.
+    local = datetime.now().astimezone().tzinfo
+    when = datetime.fromtimestamp(now, local) if now is not None else datetime.now(local)
+    day = f"{when:%a} {when.day} {when:%b %Y}"
+    if card_count:
+        return f"JobHound — {card_count} job card{'s' if card_count != 1 else ''}, {day}"
+    if status_count:
+        return f"JobHound — {status_count} job status update{'s' if status_count != 1 else ''}, {day}"
+    return f"JobHound — source updates only, {day}"
+
+
+def render_envelope(rows, *, now=None):
     """Reuse the release card renderer, not a new scoring/filtering policy."""
     from .models import Job
     from .v41.models import Assessment, Decision
@@ -97,13 +113,14 @@ def render_envelope(rows):
                    else 'Apply / act first' if decision.action_band.value == 'primary'
                    else 'Worth a bounded check')
         sections[section].append(_release_entry(item))
-    lines = ['JobHound V6 — durable opportunity digest',
-             'Frozen queue selection; provider acceptance does not establish inbox arrival.', '']
-    for name, cards in sections.items():
-        if cards:
+    card_count = len(sections['Apply / act first']) + len(sections['Worth a bounded check'])
+    lines = [_subject_line(card_count, len(sections['Status updates']), now),
+             'JobHound V6 digest. Frozen queue selection; provider acceptance does not establish inbox arrival.', '']
+    for name, entries in sections.items():
+        if entries:
             if name == 'Coverage updates':
-                cards = compact_coverage(cards)
-            lines.extend([name, '', '\n\n'.join(cards), ''])
+                entries = compact_coverage(entries)
+            lines.extend([name, '', '\n\n'.join(entries), ''])
     return '\n'.join(lines)
 
 
@@ -267,7 +284,7 @@ class DigestTransport:
             for row in rows:
                 if not self._preparable(row, destination, now):
                     raise ValueError('intent is stale, held, reserved, unavailable, or has a different destination')
-            body = render_envelope(rows)
+            body = render_envelope(rows, now=now)
             if summary_run_id is not None:
                 from .delivery_outbox import identifier
                 identifier(summary_run_id, 'staged run')

@@ -288,10 +288,19 @@ def _title_language_claims(
         r"\btarget\s+language\b.{0,50}\b(?:required|mandatory|fluency|proficiency)\b",
         normalize_match(supporting_text), re.I,
     )
-    unknown = (
-        _title_unknown_language_requirements(title, profile.known_languages)
-        if target_language_demand else set()
-    )
+    slot = _title_unknown_language_requirements(title, profile.known_languages)
+    supporting = normalize_match(supporting_text)
+    # The body may name the slot language itself ("a native Chichewa
+    # speaker", "Native-level proficiency in Shona") rather than "the target
+    # language".
+    # The language must be the object of the demand: "Fluent English and
+    # strong SEO skills" does not demand "SEO".
+    named_demand = any(re.search(
+        rf"\b(?:native|fluent|fluency|proficien(?:t|cy))(?:[\s-]+level)?"
+        rf"(?:\s+(?:proficiency|fluency))?\s+(?:in\s+)?{re.escape(lang)}\b"
+        rf"|\b{re.escape(lang)}\s+(?:speakers?|natives?)\b",
+        supporting, re.I) for lang in slot)
+    unknown = slot if (target_language_demand or named_demand) else set()
     languages = sorted(required | pairs | unknown)
     if not languages:
         return []
@@ -493,6 +502,32 @@ def _voice_readiness_claims(
     return claims
 
 
+_CREDENTIAL_ALTERNATIVE = (r"(?:degree|ph\.?d|doctorate|master'?s|bachelor'?s|certif\w*|"
+                           r"licen[cs]\w*|equivalent)")
+# The "or" must join a credential to the years themselves: "a degree or 5+
+# years", "5+ years or equivalent". "A degree and 10+ years in Python or Go"
+# is not an alternative.
+_YEARS = r"\d+\s*\+?\s*(?:years?|yrs?)\b"
+_YEARS_ALTERNATIVE_RE = re.compile(
+    rf"\b{_CREDENTIAL_ALTERNATIVE}\b[^.;]{{0,80}}?\bor\b[^.;]{{0,15}}?{_YEARS}"
+    rf"|{_YEARS}[^.;]{{0,80}}?\bor\b[^.;]{{0,30}}?\b{_CREDENTIAL_ALTERNATIVE}\b",
+    re.IGNORECASE)
+
+
+def _documented_years(claim: RequirementClaim, years: dict[str, float]) -> float | None:
+    """Documented years for the claim's field. The parsed scope is often a
+    stop word ("5+ years of experience in Mathematics" -> "of"), so a
+    documented field named just after the years in the claim's text also
+    counts; a field named elsewhere in the sentence does not."""
+    documented = years.get(str(claim.scope).casefold())
+    if documented is not None:
+        return documented
+    span = claim.span.casefold()
+    matches = [value for field, value in years.items()
+               if re.search(rf"{_YEARS}[^.;,]{{0,60}}?\b{re.escape(field)}\b", span)]
+    return max(matches) if matches else None
+
+
 def requirement_outcomes(
     requirements: RequirementsAssessment,
     profile: Profile,
@@ -519,7 +554,7 @@ def requirement_outcomes(
     for group, members in grouped.items():
         for claim in members:
             if claim.dimension == "experience":
-                documented = years.get(str(claim.scope).casefold())
+                documented = _documented_years(claim, years)
                 if documented is not None and documented >= float(claim.value):
                     satisfied_groups.add(group)
             elif claim.dimension in {"degree", "domain", "tool"} and str(claim.value).casefold() in credentials:
@@ -542,8 +577,15 @@ def requirement_outcomes(
         elif claim.dimension == "experience":
             needed = float(claim.value)
             skill = str(getattr(claim, "scope", "") or "general").casefold()
-            documented = years.get(skill)
-            if documented is None:
+            documented = _documented_years(claim, years)
+            alternative = bool(claim.logic_group) or bool(_YEARS_ALTERNATIVE_RE.search(claim.span))
+            if documented is None and needed > profile.max_required_years and not alternative:
+                # The operator's declared ceiling still applies when no
+                # field-specific years are documented. Years offered as one
+                # alternative ("a degree or 5+ years") stay a check; the
+                # parser does not always group such alternatives.
+                blockers.append(f"experience_mismatch:{skill}:{needed:g}_years")
+            elif documented is None:
                 unverified.append(f"experience_unverified:{skill}:{needed:g}_years")
             elif documented < needed:
                 blockers.append(f"experience_mismatch:{skill}:{needed:g}_years")

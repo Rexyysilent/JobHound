@@ -224,10 +224,13 @@ class PriorityKey(BaseModel):
     @property
     def semantic_tuple(self) -> tuple[int, int, int, int, int, int, int, int, str]:
         if self.policy_version == "v5.0.0-rc1":
+            # Task fit comes before action cost: a marketplace bid cost is
+            # never verified up front, so cost-first ranked every Upwork job
+            # below every other job regardless of fit (2026-09-30 email).
             return (
                 self.action_readiness, self.supported_time_to_cash,
-                self.action_cost_and_friction, self.match_strength,
-                self.role_priority, self.economics_quality,
+                self.match_strength, self.role_priority,
+                self.action_cost_and_friction, self.economics_quality,
                 self.explicit_profile_language_edge, self.source_actionability,
                 self.conservative_trust, self.freshness, self.stable_tiebreaker,
             )
@@ -365,6 +368,9 @@ class Assessment(BaseModel):
     action_cost_known: bool = False
     action_cost_acceptable: bool = False
     time_to_cash_days: float | None = None
+    # A marketplace job seen only as a search-result snippet, never the full
+    # posting. Stored so cards rendered from queued payloads can show it.
+    search_snippet_only: bool = False
 
 
 class Decision(BaseModel):

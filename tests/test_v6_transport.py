@@ -184,7 +184,7 @@ def test_reopen_and_two_workers_one_claim(store):
 def test_atomic_prepare_on_renderer_failure(store,monkeypatch):
     stage(store)
     transport=DigestTransport(store.delivery)
-    monkeypatch.setattr('jobhound.delivery_transport.render_envelope',lambda _: (_ for _ in ()).throw(ValueError('bad')))
+    monkeypatch.setattr('jobhound.delivery_transport.render_envelope',lambda _, **kw: (_ for _ in ()).throw(ValueError('bad')))
     with pytest.raises(ValueError):
         transport.prepare(EMAIL,[store.delivery.inspect()[0]['id']],now=101)
     assert count(store,'delivery_envelopes')==count(store,'delivery_envelope_items')==0
@@ -218,7 +218,7 @@ def test_new_revision_cancels_unsent_envelope_and_cannot_bypass_reservation(stor
 def telegram_prepared(store,monkeypatch):
     import jobhound.delivery_transport as module
     renderer=module.render_envelope
-    monkeypatch.setattr(module,'render_envelope',lambda rows:renderer(rows)+'\n'+'x'*9000)
+    monkeypatch.setattr(module,'render_envelope',lambda rows, **kw:renderer(rows, **kw)+'\n'+'x'*9000)
     return prepared(store,TELEGRAM)
 
 

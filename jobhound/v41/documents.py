@@ -21,6 +21,7 @@ class DocumentClassification:
 
 
 _INDEX = re.compile(r"\b(?:browse|view|search|explore)\s+(?:(?:all|our|current|open|remote)\s+){0,3}(?:jobs|roles|openings)\b|\bjob\s+openings\b", re.I)
+_SEARCH_RESULTS = re.compile(r"\bbrowse\s+\d[\d,]*\+?\s+(?:[\w&/'-]+\s+){0,6}jobs\b", re.I)
 _SELLER = re.compile(r"\b(?:i\s+will|i\s+offer|buy\s+my|my\s+(?:service|gig|package)|hire\s+me|order\s+now|purchase\s+my|packages?\s+start(?:ing)?\s+at)\b", re.I)
 _BUYER = re.compile(r"\b(?:buyer\s+seeks?|looking\s+(?:for|to\s+hire)|seeking|need(?:ed)?|hiring)\b.{0,80}\b(?:freelancer|contractor|developer|annotator|transcriber|specialist|someone)\b", re.I)
 _RECRUITMENT = re.compile(
@@ -111,6 +112,15 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
             return DocumentClassification("talent_directory", "index", "buyer_browsing", False, ("talent_directory_route",))
         if path.startswith("/freelance-jobs/apply/") or re.fullmatch(r"/jobs/~[0-9]+", path):
             return DocumentClassification("buyer_request", "individual_request", "buyer", True, ("individual_buyer_route",))
+    # Vollna's /freelance-<topic>-jobs pages are category landing pages; every
+    # Vollna URL seen in production (2026-09/10) has this shape.
+    if host == "vollna.com" and re.fullmatch(r"/freelance-[a-z0-9-]+-jobs", path):
+        return DocumentClassification("job_index", "index", "employer", False, ("marketplace_category_page",))
+    # "Browse 1000+ AI CONTENT EVALUATOR jobs" opening a page is a board's
+    # search-results page; the same words in a job page's footer are not.
+    if (_SEARCH_RESULTS.search(normalize_match(title))
+            or _SEARCH_RESULTS.search(normalize_match(text.lstrip()[:60]))) and not individual_query:
+        return DocumentClassification("job_index", "index", "employer", False, ("search_results_page",))
     if host in {"reddit.com", "old.reddit.com"} and "/comments/" in path:
         if _BUYER.search(combined):
             return DocumentClassification("buyer_request", "individual_request", "buyer", True, ("explicit_buyer_demand",))
