@@ -27,6 +27,11 @@ archives, captured job text and runtime receipts are not distributed.
   language or pay evidence. Dropdown options cannot reject an otherwise
   compatible role; genuine requirements outside forms remain enforced. Omitted
   sections have content hashes linked to the full fetched-body hash.
+- The same boundary now covers V5.5 ATS HTML descriptions, Lever requirement
+  lists and generic JobPosting/visible-page hydration. Original fields remain
+  intact, generic form text cannot close a role, and uncertain control boundaries
+  cannot claim complete extraction. Matching plain/HTML views use structural
+  boundaries; unmatched plain claims are preserved. Legacy conversion is unchanged.
 - Source-plan overlays share HTTP budgets with logical search/inspection caps.
   Cadence changes need adequately covered checks; partial or failed retrieval
   cannot count as a healthy zero-yield observation. Category/page failures

@@ -126,7 +126,7 @@ def normalize_lines(value: str | None) -> str:
     return normalize_text(value) or ""
 
 
-def html_to_text(value: str | None) -> str:
+def html_to_text(value: str | None, *, role_only: bool = False) -> str:
     """Convert provider HTML without flattening its semantic structure.
 
     Block elements become line boundaries and list items receive a stable
@@ -135,6 +135,9 @@ def html_to_text(value: str | None) -> str:
     """
     if value is None:
         return ""
+    if role_only:
+        from .document_regions import role_markup
+        value = role_markup(value)
     decoded = html_lib.unescape(value)
     if "<" not in decoded or ">" not in decoded:
         return normalize_lines(decoded)

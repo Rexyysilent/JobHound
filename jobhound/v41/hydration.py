@@ -25,7 +25,9 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from ..models import Job
-from ..normalize import company_from_job_url, normalize, _parse_dt
+from ..normalize import company_from_job_url, normalize, _parse_dt, _description
+from ..document_regions import role_markup
+from ..text import html_to_text
 from .models import ListingObservation, SourceKind
 from .provenance import sanitize_payload, sanitize_url
 from .evidence_dimensions import public_page_kind, work_arrangement, project_observation
@@ -350,7 +352,7 @@ class _ClosureBlocks(HTMLParser):
 
 def _scoped_closure(body: str, title: str) -> dict | None:
     parser = _ClosureBlocks()
-    parser.feed(body)
+    parser.feed(role_markup(body))
     parser.flush()
     if len(parser.headings) != 1 or parser.headings[0].casefold() != ' '.join(title.split()).casefold():
         return None
@@ -503,13 +505,18 @@ def _posting_salary(payload: dict) -> str | None:
 
 
 def _generic_job(payload: dict, public_url: str, body: str) -> Job | None:
+    from ..config import CONFIG
     org = payload.get("hiringOrganization") or {}
     remote_type = str(payload.get('jobLocationType') or '').casefold() == 'telecommute'
     eligible = payload.get('applicantLocationRequirements')
     location = _posting_location(eligible if remote_type and eligible else payload.get('jobLocation') or eligible)
     description = str(payload.get("description") or "")
     if not description:
-        parser = _VisibleText(); parser.feed(body[:2_000_000]); description = " ".join(parser.parts)
+        parser = _VisibleText()
+        parser.feed(role_markup(body) if CONFIG.v55.enabled else body[:2_000_000])
+        description = " ".join(parser.parts)
+    elif CONFIG.v55.enabled:
+        description = html_to_text(description, role_only=True)
     title = str(payload.get("title") or "").strip()
     company = str(org.get("name") or "").strip() if isinstance(org, dict) else str(org)
     if not title or not description:
@@ -712,20 +719,26 @@ def _parse_posting_response(response, *, source, public, request_url, posting_id
         if payload is None:
             return HydrationResult(state="unavailable", source=source, request_url=request_url, public_url=public, error="posting_not_found")
         payload = dict(payload, _slug=seg[0], _company=company_from_job_url(public))
+    normalized_payload = payload
     if source == "lever" and isinstance(payload, dict):
+        from ..config import CONFIG
         named = []
         for block in payload.get("lists") or []:
             if isinstance(block, dict):
-                named.append(f"{block.get('text') or ''}\n{re.sub(r'<[^>]+>', ' ', str(block.get('content') or ''))}")
+                content = str(block.get('content') or '')
+                content = html_to_text(content, role_only=True) if CONFIG.v55.enabled else re.sub(r'<[^>]+>', ' ', content)
+                named.append(f"{block.get('text') or ''}\n{content}")
         if named:
-            payload = dict(payload)
-            payload["descriptionPlain"] = "\n".join(filter(None, [
-                str(payload.get("descriptionPlain") or ""), *named
+            normalized_payload = dict(payload)
+            normalized_payload["descriptionPlain"] = "\n".join(filter(None, [
+                _description(payload.get('descriptionPlain'),payload.get('description')) if CONFIG.v55.enabled else str(payload.get("descriptionPlain") or ""), *named
             ]))
+            if not CONFIG.v55.enabled:
+                payload = normalized_payload
     if not isinstance(payload, dict):
         return HydrationResult(state="failed", source=source, request_url=request_url, public_url=public, error="invalid_payload")
     try:
-        hydrated = normalize({"source": source, "raw": payload})
+        hydrated = normalize({"source": source, "raw": normalized_payload})
     except (KeyError, TypeError, ValueError) as exc:
         return HydrationResult(state="failed", source=source, request_url=request_url, public_url=public, error=f"normalize_{type(exc).__name__}")
     if hydrated is None:

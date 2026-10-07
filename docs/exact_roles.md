@@ -50,7 +50,17 @@ matching evidence. The payload retains the full fetched-body hash and records
 omitted outer regions by element/ARIA role, text hash and character count.
 Genuine requirements outside those regions remain authoritative. This boundary
 is covered through both native hydrators and the decision engine; it does not
-establish segmentation of every generic employer page or plain-text feed.
+establish segmentation of every employer template or plain-text feed.
+
+The same explicit control boundaries apply to V5.5 Ashby, Lever and Greenhouse
+HTML descriptions, Lever requirement lists and generic JobPosting hydration,
+including its visible-page fallback. Original provider fields stay in the
+hydration payload; cleaned descriptions are separate. Where an ATS supplies
+both plain and HTML views, HTML boundaries are used only when their original
+text agrees. Unmatched plain text remains authoritative. Generic closure
+extraction excludes controls before looking for a same-role closure notice.
+Malformed or unclosed control boundaries cannot claim complete extraction.
+Default text conversion and feature-off hydration retain legacy behavior.
 
 Enable collection only after a separate logged source-plan admission, explicit
 route scope and an adequately covered bounded check. This parser implementation

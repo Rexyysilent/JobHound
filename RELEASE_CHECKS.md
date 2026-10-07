@@ -6,8 +6,8 @@ quality or a certification of all security properties.
 
 ## Included implementation
 
-- All **96 Python package modules** from the current implementation are included.
-  After line-ending normalization, 94 have identical source text; two differ
+- All **97 Python package modules** from the current implementation are included.
+  After line-ending normalization, 95 have identical source text; two differ
   only by removal of private project/network references in docstrings. No
   runtime algorithm or security fix is removed for publication.
 - The source includes native community/exact-role readers, attempt and
@@ -43,17 +43,19 @@ quality or a certification of all security properties.
 
 ## Verification
 
-- Public-copy offline suite: **2,127 passed, 1 skipped**. The skipped test needs a
+- Public-copy offline suite: **2,173 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use
   synthetic policy, blank provider credentials and blocked external sockets.
 - Focused public initialization/recovery and publication controls: **60 passed**,
   including qualification-free startup, cross-profile isolation, closed backup
   recovery and the new private workspace-path exclusions.
-- Native-role/form boundary, exact-role, scoped closure and action-policy checks:
-  **81 passed**, including 18 form/navigation controls through mocked native
-  hydration and the real engine. Dropdown choices cannot add language/pay claims;
-  genuine requirements outside forms remain enforced. Full fetched-body hashes
-  and omitted-region hashes retain the evidence boundary.
+- Role boundary, exact-role, scoped closure, semantic, action-policy and hydration
+  checks: **186 passed**, including 46 HTML-feed/generic-hydration controls and
+  18 existing native form controls. Dropdown choices cannot add language/pay
+  claims or close a generic role. Genuine requirements and closure notices
+  remain enforced. Full fetched-body/omitted-region hashes and original provider
+  fields retain provenance. Uncertain control boundaries cannot claim complete
+  extraction; legacy conversion remains covered with V5.5 disabled.
 - Acceptance adapter: **100 outputs, 0 errors**. Contract evaluator: **100 cases,
   204 assertions passed**. These assertions apply to the supplied outputs, not
   live-market performance or provider delivery.

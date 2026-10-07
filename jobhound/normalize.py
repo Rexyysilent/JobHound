@@ -64,7 +64,21 @@ def remote_signal(text: str, *, explicit: bool = False) -> bool:
 
 
 def _strip_html(text: str | None) -> str:
-    return html_to_text(text)
+    return html_to_text(text, role_only=CONFIG.v55.enabled)
+
+
+def _description(plain: str | None, markup: str | None) -> str:
+    if plain:
+        if CONFIG.v55.enabled and markup:
+            original = html_to_text(markup)
+            # Only use structural boundaries when the two native views contain
+            # the same text. A different HTML view cannot erase plain claims.
+            if ' '.join(original.split()) == ' '.join(plain.split()):
+                scoped = _strip_html(markup)
+                if scoped != original:
+                    return scoped
+        return plain.strip()
+    return _strip_html(markup).strip()
 
 
 def _strip_url_query(url: str | None) -> str:
@@ -449,7 +463,7 @@ def _norm_greenhouse(raw: dict) -> Job:
 
 
 def _norm_lever(raw: dict) -> Job:
-    desc = (raw.get("descriptionPlain") or _strip_html(raw.get("description"))).strip()
+    desc = _description(raw.get("descriptionPlain"), raw.get("description"))
     cats = raw.get("categories") or {}
     loc = ", ".join(p for p in (cats.get("location"), raw.get("country")) if p)
     title = (raw.get("text") or "").strip()
@@ -481,7 +495,7 @@ def _norm_lever(raw: dict) -> Job:
 
 
 def _norm_ashby(raw: dict) -> Job:
-    desc = (raw.get("descriptionPlain") or _strip_html(raw.get("descriptionHtml"))).strip()
+    desc = _description(raw.get("descriptionPlain"), raw.get("descriptionHtml"))
     secondary = [s if isinstance(s, str) else (s.get("location") or "")
                  for s in raw.get("secondaryLocations") or []]
     loc = ", ".join(p for p in [raw.get("location"), *secondary] if p)
