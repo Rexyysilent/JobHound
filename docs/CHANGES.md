@@ -23,6 +23,10 @@ archives, captured job text and runtime receipts are not distributed.
   older amounts remain history and do not establish an agreed quote.
 - Exact Turing/micro1 readers retain native role identity and requirement
   sections; an empty shell or mismatched role stays partial.
+- Visible application controls and navigation no longer supply native-role
+  language or pay evidence. Dropdown options cannot reject an otherwise
+  compatible role; genuine requirements outside forms remain enforced. Omitted
+  sections have content hashes linked to the full fetched-body hash.
 - Source-plan overlays share HTTP budgets with logical search/inspection caps.
   Cadence changes need adequately covered checks; partial or failed retrieval
   cannot count as a healthy zero-yield observation. Category/page failures

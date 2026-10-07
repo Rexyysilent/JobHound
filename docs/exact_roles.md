@@ -43,6 +43,15 @@ profile is distributed. These fixtures are not coverage of either platform or
 proof of an individual offer, allocation or payment. Role extraction excludes
 unrelated public referral identity.
 
+Native role text excludes application forms, dropdown options, input controls
+and navigation, including explicit semantic ARIA form/control regions. These
+visible page elements cannot supply role language requirements, compensation or
+matching evidence. The payload retains the full fetched-body hash and records
+omitted outer regions by element/ARIA role, text hash and character count.
+Genuine requirements outside those regions remain authoritative. This boundary
+is covered through both native hydrators and the decision engine; it does not
+establish segmentation of every generic employer page or plain-text feed.
+
 Enable collection only after a separate logged source-plan admission, explicit
 route scope and an adequately covered bounded check. This parser implementation
 does not itself admit a new daily source family or establish source yield.

@@ -17,6 +17,11 @@ from .models import SourceKind
 
 class NativeError(ValueError):pass
 
+# Visible application controls/navigation are document evidence, not role copy.
+_NON_ROLE_TAGS={'form','fieldset','legend','label','input','select','option',
+                'optgroup','datalist','textarea','button','nav'}
+_NON_ROLE_ARIA={'form','navigation','listbox','combobox','radiogroup','textbox','button','menu','menuitem'}
+
 @dataclass
 class Node:
     tag:str
@@ -32,9 +37,20 @@ class Node:
         if 'display:none' in style or 'visibility:hidden' in style:return False
         return self.parent is None or self.parent.visible
 
-    def text(self,*,raw=False):
-        if not raw and not self.visible:return ''
-        value=''.join(c if isinstance(c,str) else c.text(raw=raw) for c in self.children)
+    @property
+    def role_visible(self):
+        node=self
+        while node is not None:
+            if node.tag in _NON_ROLE_TAGS or set(node.attrs.get('role','').casefold().split()) & _NON_ROLE_ARIA:
+                return False
+            node=node.parent
+        return self.visible
+
+    def text(self,*,raw=False,role_only=True):
+        if not raw:
+            if not self.visible:return ''
+            if role_only and not self.role_visible:return '\n'
+        value=''.join(c if isinstance(c,str) else c.text(raw=raw,role_only=role_only) for c in self.children)
         if not raw and self.tag in {'div','p','li','h1','h2','h3','h4','ul','ol','br','section'}:
             return '\n'+value+'\n'
         return value
@@ -57,6 +73,16 @@ class Tree(HTMLParser):
 
 def clean(text):return re.sub(r'[ \t\r\f\v]+',' ',text).strip()
 def name(text):return re.sub(r'\s+',' ',text).strip().casefold()
+
+def excluded_sections(tree):
+    """Record outer omitted regions, bound to text plus the full native-body hash."""
+    result=[]
+    for node in tree.nodes:
+        if node.visible and not node.role_visible and (node.parent is None or node.parent.role_visible):
+            text=node.text(role_only=False)
+            result.append(dict(tag=node.tag,aria_role=node.attrs.get('role'),
+                text_sha256=hashlib.sha256(text.encode()).hexdigest(),text_characters=len(text)))
+    return result
 
 def role_route(url):
     try:
@@ -104,19 +130,19 @@ def _turing(tree,url,role_id):
                 if isinstance(child,Node):child.parent=parent
             source.children=[];source.parent.children.remove(source)
             source.attrs.pop('id');target.attrs.pop('id')
-    heads=[n for n in tree.nodes if n.tag=='h1' and n.visible]
+    heads=[n for n in tree.nodes if n.tag=='h1' and n.role_visible]
     if len(heads)!=1 or not name(heads[0].text()):raise NativeError('native_role_heading_missing')
     title=clean(heads[0].text())
-    metadata=[n.attrs.get('content') for n in tree.nodes if n.tag=='meta' and n.visible and n.attrs.get('property')=='og:url']
+    metadata=[n.attrs.get('content') for n in tree.nodes if n.tag=='meta' and n.role_visible and n.attrs.get('property')=='og:url']
     valid={f'https://work.turing.com/r/{role_id}',f'https://developers.turing.com/r/{role_id}'}
     if len(metadata)!=1 or metadata[0].rstrip('/') not in valid:raise NativeError('native_role_identity_mismatch')
     cards=[]
     for card in tree.nodes:
-        if card.attrs.get('data-slot')!='card' or not card.visible:continue
+        if card.attrs.get('data-slot')!='card' or not card.role_visible:continue
         headers=[n for n in card.children if isinstance(n,Node) and n.attrs.get('data-slot')=='card-header']
         if len(headers)==1 and name(headers[0].text())=='overview':cards.append(card)
     if len(cards)!=1:raise NativeError('native_role_card_missing')
-    contents=[n for n in cards[0].children if isinstance(n,Node) and n.attrs.get('data-slot')=='card-content' and n.visible]
+    contents=[n for n in cards[0].children if isinstance(n,Node) and n.attrs.get('data-slot')=='card-content' and n.role_visible]
     if len(contents)!=1:raise NativeError('native_role_card_missing')
     # The heading and card must belong to the same native column, not a sidebar.
     ancestor=cards[0].parent
@@ -131,6 +157,7 @@ def _turing(tree,url,role_id):
     location='Remote' if re.search(r'(?im)^\s*Remote\s*$',badges) else ''
     return Job(source='turing_role',url=url,title=title,company='Turing',description=text,location=location,is_remote=location=='Remote'),dict(
         role_id=role_id,sections=sections,native_role_text=text,native_role_text_sha256=hashlib.sha256(text.encode()).hexdigest(),
+        excluded_document_sections=excluded_sections(tree),
         native_status='unknown',role_metadata_url=metadata[0]),'unknown'
 
 def _flight(tree):
@@ -228,6 +255,7 @@ def _micro1(tree,url,role_id):
     return Job(source='micro1_role',url=url,title=clean(title),company='micro1',description=text,location=location,
         is_remote=name(location)=='remote',posted_at=published),dict(role_id=role_id,sections=sections,native_role_text=text,
         native_role_text_sha256=hashlib.sha256(text.encode()).hexdigest(),native_status=status,
+        excluded_document_sections=excluded_sections(role_tree),
         advertised_pay=money,publication_date=data.get('create_datetime')),'explicitly_closed' if status=='closed' else 'unknown'
 
 def parse_native_role(body,url,original,*,captured_at=None,from_cache=False):

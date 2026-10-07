@@ -43,12 +43,17 @@ quality or a certification of all security properties.
 
 ## Verification
 
-- Public-copy offline suite: **2,109 passed, 1 skipped**. The skipped test needs a
+- Public-copy offline suite: **2,127 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use
   synthetic policy, blank provider credentials and blocked external sockets.
 - Focused public initialization/recovery and publication controls: **60 passed**,
   including qualification-free startup, cross-profile isolation, closed backup
   recovery and the new private workspace-path exclusions.
+- Native-role/form boundary, exact-role, scoped closure and action-policy checks:
+  **81 passed**, including 18 form/navigation controls through mocked native
+  hydration and the real engine. Dropdown choices cannot add language/pay claims;
+  genuine requirements outside forms remain enforced. Full fetched-body hashes
+  and omitted-region hashes retain the evidence boundary.
 - Acceptance adapter: **100 outputs, 0 errors**. Contract evaluator: **100 cases,
   204 assertions passed**. These assertions apply to the supplied outputs, not
   live-market performance or provider delivery.
