@@ -223,6 +223,30 @@ def _priority_line(item: EvaluatedJob, *, show_debug: bool) -> str:
     )
 
 
+def _benefits_line(item: EvaluatedJob) -> str | None:
+    claims=[];seen=set()
+    for candidate in item.assessment.pay_candidates:
+        if candidate.scope != 'role_benefit_unverified' and not candidate.scope.startswith('community_benefit:'):
+            continue
+        key=(candidate.raw.casefold(),candidate.currency,candidate.actual_unit,candidate.amount_low,candidate.amount_high)
+        if key in seen:
+            continue
+        seen.add(key)
+        literal=' '.join(candidate.raw.split())
+        if len(literal)>220:
+            literal=literal[:220]+'… [full wording and conditions retained in audit]'
+        amount=_amount_text(candidate)
+        unit_note='; period not stated' if candidate.actual_unit=='unknown' else ''
+        claims.append((amount+' — ' if amount else '')+'"'+literal+'"'+unit_note)
+    if not claims:
+        return None
+    visible='; '.join(claims[:3])
+    if len(claims)>3:
+        extra=len(claims)-3
+        visible+=f'; {extra} additional '+('claim' if extra==1 else 'claims')+' retained in audit'
+    return 'Additional cash benefits (posting claims): '+visible+'; excluded from wage ranking; payout not confirmed'
+
+
 def _entry(
     item: EvaluatedJob,
     *,
@@ -249,6 +273,9 @@ def _entry(
         f"  Freshness: {_freshness_line(item)}",
         f"  Why: {item.decision.explanation}",
     ]
+    benefits=_benefits_line(item)
+    if benefits:
+        lines.insert(7,'  '+benefits)
     if item.decision.watch_outs:
         lines.append(
             f"  Watch-outs: {', '.join(_ordered_watchouts(item.decision.watch_outs))}"
@@ -599,7 +626,9 @@ def build_digest(
 
 def _release_entry(item: EvaluatedJob) -> str:
     decision, assessment = item.decision, item.assessment
-    lines = [f"• {decision.next_action.replace('_', ' ').upper()} | {item.job.title} | {item.job.company or 'Employer unverified'}"]
+    label = ('HISTORICAL LEAD' if assessment.lifecycle_reason == 'historical_buyer_request'
+             else decision.next_action.replace('_', ' ').upper())
+    lines = [f"• {label} | {item.job.title} | {item.job.company or 'Employer unverified'}"]
     # Cards are also rendered from queued payloads (job, assessment, decision
     # only), so read the stored flag rather than the canonical observations.
     if assessment.search_snippet_only:
@@ -616,6 +645,9 @@ def _release_entry(item: EvaluatedJob) -> str:
         f"  Readiness: {assessment.action_readiness.replace('_', ' ')}; {_access_line(item)}",
         f"  Next: {decision.next_step}",
     ])
+    benefits=_benefits_line(item)
+    if benefits:
+        lines.append('  '+benefits)
     dimensions = assessment.evidence_dimensions
     if dimensions:
         publisher = dimensions['publisher'].value
@@ -630,7 +662,7 @@ def _release_entry(item: EvaluatedJob) -> str:
         lines.append('  Checked: current opening not verified.')
     # Exact stored priority components, not a second additive score.
     key = decision.priority_key
-    lines.append(f"  Ordering: readiness {key.action_readiness}, time-to-cash evidence {key.supported_time_to_cash:g}, task fit {key.match_strength}/{key.role_priority}, action-cost evidence {key.action_cost_and_friction}, economics evidence {key.economics_quality}, language edge {key.explicit_profile_language_edge}, source {key.source_actionability}, conservative trust {key.conservative_trust}, freshness {key.freshness}.")
+    lines.append(f"  Ordering: readiness {key.action_readiness}, time-to-cash evidence {key.supported_time_to_cash:g}, task fit {assessment.match_strength.value}, role priority {key.role_priority}, action-cost evidence {key.action_cost_and_friction}, economics evidence {key.economics_quality}, language edge {key.explicit_profile_language_edge}, source {key.source_actionability}, conservative trust {key.conservative_trust}, freshness {key.freshness}.")
     lines.append(f"  {public_url(item.job.url)}")
     return '\n'.join(lines)
 

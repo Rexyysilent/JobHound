@@ -329,16 +329,29 @@ def _experience_claims(
 ) -> list[RequirementClaim]:
     claims: list[RequirementClaim] = []
     for segment in _segments(text):
-        for match in _EXPERIENCE.finditer(normalize_match(segment)):
+        normalized = normalize_match(segment)
+        matches = list(_EXPERIENCE.finditer(normalized))
+        for index, match in enumerate(matches):
+            # The next years clause starts a new predicate, even in one sentence.
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(normalized)
+            local = normalized[0 if index == 0 else match.start():end].strip()
             value = _number(match.group("low"))
-            modality = _modality(segment, default_required=True)
-            if _NEGATED_REQUIREMENT.search(segment):
+            modality = _modality(local, default_required=True)
+            if _NEGATED_REQUIREMENT.search(local):
                 modality = "explicitly_not_required"
             if match.group("prefix") or match.group("plus"):
-                modality = "minimum" if modality not in {"preferred", "optional"} else modality
-            skill_match = _SKILL_EXPERIENCE.search(normalize_match(segment))
+                modality = "minimum" if modality in {"required", "minimum"} else modality
+            skill_match = _SKILL_EXPERIENCE.search(local)
+            if skill_match is None:
+                skill_match = _SKILL_WORK.search(local)
             skill = skill_match.group("skill").strip().casefold() if skill_match else "general"
-            if re.search(r"\brelevant\s+professional\s+work\b", segment, re.I):
+            if skill in {'of', 'in', 'with', 'relevant'}:
+                skill = 'general'
+            if skill == 'general':
+                field_match = re.search(r"\bexperience\s+(?:in|with|using)\s+([a-z][a-z0-9+#. -]*?)(?=\s+(?:and|or|required|preferred)\b|[,;()]|$)", local, re.I)
+                if field_match:
+                    skill = field_match.group(1).strip().casefold()
+            if re.search(r"\brelevant\s+professional\s+work\b", local, re.I):
                 skill = "relevant_work"
             claims.append(RequirementClaim(
                 dimension="experience",
@@ -347,22 +360,12 @@ def _experience_claims(
                 required=modality in {"required", "minimum"},
                 observation_id=observation_id,
                 source_field=source_field,
-                span=segment[:500],
+                span=local[:500],
                 confidence=0.95 if modality != "unknown" else 0.75,
                 actor="applicant",
                 predicate="has_experience",
-                polarity="negative" if _NEGATED_REQUIREMENT.search(segment) else "positive",
+                polarity="negative" if _NEGATED_REQUIREMENT.search(local) else "positive",
                 scope=skill,
-            ))
-        for match in _SKILL_WORK.finditer(normalize_match(segment)):
-            value = _number(match.group("years"))
-            modality = _modality(segment, default_required=True)
-            claims.append(RequirementClaim(
-                dimension="experience", value=value, modality=modality,
-                required=modality in {"required", "minimum"},
-                observation_id=observation_id, source_field=source_field,
-                span=segment[:500], confidence=0.95, actor="applicant",
-                predicate="has_experience", scope=match.group("skill").casefold(),
             ))
     return claims
 
@@ -442,6 +445,9 @@ def _location_claims(
         )
     for segment in location_segments:
         folded = normalize_match(segment).casefold()
+        from ..filters.listing_quality import employer_location_statement, geographic_alias
+        if not structured and employer_location_statement(segment):
+            continue
         exclusion = CONFIG.v55.enabled and re.search(
             r"\b(?:not\s+eligible|ineligible|excluded)\b|^\s*(?:except|excluding)\b", folded
         )
@@ -455,7 +461,7 @@ def _location_claims(
             if exclusion and canonical == "united_kingdom":
                 aliases = (*aliases, "uk")
             if any(
-                re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", folded)
+                geographic_alias(alias, folded, structured=structured)
                 for alias in aliases
             ):
                 values.append(canonical)
@@ -519,12 +525,30 @@ def _documented_years(claim: RequirementClaim, years: dict[str, float]) -> float
     stop word ("5+ years of experience in Mathematics" -> "of"), so a
     documented field named just after the years in the claim's text also
     counts; a field named elsewhere in the sentence does not."""
-    documented = years.get(str(claim.scope).casefold())
+    scope = str(claim.scope).casefold()
+    documented = years.get(scope)
     if documented is not None:
         return documented
+    if ' and ' in scope and ' or ' not in scope:
+        fields = [field.strip() for field in scope.split(' and ')]
+        return min(years[field] for field in fields) if all(field in years for field in fields) else None
+    if ' or ' in scope and ' and ' not in scope:
+        documented = [years[field.strip()] for field in scope.split(' or ') if field.strip() in years]
+        return max(documented) if documented else None
+    if scope not in {'general', 'of', 'in', 'with', 'relevant', 'professional', 'prior', 'commercial', 'hands-on', 'full-time'}:
+        # A parsed field cannot borrow unrelated evidence mentioned nearby.
+        return None
     span = claim.span.casefold()
+    # Compatibility for older claims with scope='of': inspect only the clause
+    # containing this predicate, never another requirement's years/field.
+    clauses = list(_EXPERIENCE.finditer(span))
+    if clauses:
+        first = clauses[0]
+        if _number(first.group('low')) != float(claim.value):
+            return None
+        span = span[first.start():clauses[1].start() if len(clauses) > 1 else len(span)]
     matches = [value for field, value in years.items()
-               if re.search(rf"{_YEARS}[^.;,]{{0,60}}?\b{re.escape(field)}\b", span)]
+               if re.search(rf"{_YEARS}\s+(?:of\s+)?(?:experience\s+(?:in|with|using)\s+)?{re.escape(field)}\b", span)]
     return max(matches) if matches else None
 
 
@@ -675,7 +699,7 @@ def assess_requirements(
             structured=False,
         ))
         description = job.description or ""
-        sections = extract_sections(description)
+        sections = extract_sections(description,native_source=job.source if CONFIG.v55.enabled else None)
         authoritative_complete = (
             observation.source_kind in _AUTHORITATIVE_REQUIREMENTS
             and (
@@ -857,6 +881,8 @@ def language_mismatches(
 def location_mismatches(requirements: RequirementsAssessment) -> list[str]:
     reasons: list[str] = []
     for claim in requirements.location_scope:
+        if claim.evidence_status == 'weak_copy':
+            continue
         values = {
             str(value).casefold()
             for value in (

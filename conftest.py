@@ -30,3 +30,13 @@ def no_external_network(monkeypatch):
         return checked
     monkeypatch.setattr(socket.socket, "connect", guard(connect))
     monkeypatch.setattr(socket.socket, "connect_ex", guard(connect_ex))
+
+
+@pytest.fixture(autouse=True)
+def _pin_rollout_switches(monkeypatch):
+    """Each test explicitly opts into the rollout policy it exercises."""
+    from jobhound.config import CONFIG
+    monkeypatch.setattr(CONFIG.v55, 'enabled', False)
+    monkeypatch.setattr(CONFIG.v55, 'production_approved', False)
+    monkeypatch.setattr(CONFIG.delivery, 'enabled', False)
+    monkeypatch.setattr(CONFIG.delivery, 'production_approved', False)

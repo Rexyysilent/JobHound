@@ -77,6 +77,11 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
     # A document classification is not proof of a live vacancy or eligibility.
     if not title.strip() and not text.strip():
         return DocumentClassification("unknown", "unknown", "unknown", False, ("empty_document",))
+    from ..filters.listing_quality import resource_page_check
+    content_reasons = resource_page_check(title, url)
+    if content_reasons:
+        return DocumentClassification('article', 'non_opportunity', 'content', False,
+                                      tuple(content_reasons))
     try:
         query = parse_qs(split.query)
     except (UnboundLocalError, ValueError):
@@ -147,8 +152,24 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
 def classify_offer(canonical: object) -> DocumentClassification:
     """Classify a CanonicalJob without coupling this focused helper to models."""
     job = getattr(canonical, "job", canonical)
+    if getattr(job, 'source', '') == 'community_thread':
+        observations = getattr(canonical, 'observations', [])
+        matching = next((o for o in observations if o.source == 'community_thread' and o.job and o.job.url == job.url), None)
+        return classify_observation(matching) if matching else DocumentClassification('unknown', 'unknown', 'unknown', False, ('thread_evidence_missing',))
     return classify_document(
         str(getattr(job, "title", "") or ""),
         str(getattr(job, "description", "") or ""),
         str(getattr(job, "url", "") or ""),
     )
+
+
+def classify_observation(observation) -> DocumentClassification:
+    if observation.source == 'community_thread':
+        from .community import observation_thread
+        thread = observation_thread(observation)
+        if thread is None:
+            return DocumentClassification('unknown', 'unknown', 'unknown', False, ('thread_evidence_invalid',))
+        return DocumentClassification(thread.document_type,
+            'individual_request' if thread.intent == 'buyer' else 'non_opportunity', thread.intent,
+            thread.intent == 'buyer', ('community_actor_scoped', *thread.caveats))
+    return classify_document(observation.job.title, observation.job.description or '', observation.job.url)

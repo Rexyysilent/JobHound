@@ -196,5 +196,41 @@
     "kind": "home_path",
     "sha256": "c220dbe27040c207a5b95bd82acf1c569fbb3ac8984789a8205b466aae2055aa",
     "reason": "Reviewed: Upwork's legacy public profile route (the o/profiles route), not a local home directory."
+  },
+  {
+    "path": "tests/test_exact_roles.py",
+    "kind": "credential_query",
+    "sha256": "c7947d8a76bc7f55d58d4cf20f1da662fbaa3780b82b063d5b87ee60159f01fc",
+    "reason": "A literal token=synthetic in an invalid-route contract test."
+  },
+  {
+    "path": "tests/test_outcome_aliases.py",
+    "kind": "credential_query",
+    "sha256": "5f40cb1334f4590156e7b3d19967bec3d4599e70f90da2e29a3e9993cdb72801",
+    "reason": "Literal utm_source=first tracking metadata in a synthetic identity test."
+  },
+  {
+    "path": "tests/test_outcome_aliases.py",
+    "kind": "credential_query",
+    "sha256": "ba9f11eefc4b6db4cb48de3dd065c5dbfcc0ff7a6c40dc765354bcbba4e0ae24",
+    "reason": "Literal utm_source=second tracking metadata in a synthetic identity test."
+  },
+  {
+    "path": "tests/test_outcome_aliases.py",
+    "kind": "credential_query",
+    "sha256": "3a514bba8eeff473544f9bc0bab6c05a4490deafb602edac2f2ad230f2123cc1",
+    "reason": "Literal token=private is an invalid synthetic alias input, not a credential."
+  },
+  {
+    "path": "tests/test_source_policy.py",
+    "kind": "credential_assignment",
+    "sha256": "8891c0f3d18872dec9791ef90cbbec32d9af4172c643f3a831e174614618ba5a",
+    "reason": "Literal authorization=synthetic tests rejection before dispatch."
+  },
+  {
+    "path": "tests/test_work_outcomes.py",
+    "kind": "credential_query",
+    "sha256": "6638ba1b795adae61e9aa322f52f67c17b049f53eae6404a3994bab368bc4b34",
+    "reason": "Literal token=synthetic tests quarantine of an authenticated work route."
   }
 ]

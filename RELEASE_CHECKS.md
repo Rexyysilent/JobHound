@@ -1,77 +1,81 @@
 # Public source verification
 
-Prepared 2026-09-27 from the current private implementation. This is a
-development source release, not a certification of all security properties or
-of live job quality.
+Prepared October 7, 2026 from the current cumulative implementation. This is a
+regression-verified development source update, not independent recommendation
+quality or a certification of all security properties.
 
-## What this export contains
+## Included implementation
 
-- The full current implementation: V4.2 and V5.5 engines, v6 bounded fetching
-  and batch retention (ATS boards, JSearch/Serper queries), production
-  hydration with persistent verification history, v5.7 scoped outcome events
-  (offline preview), review/audit tooling, the durable delivery outbox and the
-  offline workbench.
-- 129 package and test files are byte-identical to the private implementation.
-  Eight carry only sanitization edits: neutral delivery defaults and one
-  docstring in the package; example addresses, synthetic fixture paths and
-  synthetic-provenance wording in six tests. One production-derived fixture is
-  excluded and replaced by the existing synthetic ranking fixture.
-- Public-only tooling is retained: synthetic test settings, acceptance
-  contracts and the publication checker. CI (Linux and Windows) and contributor
-  docs were carried forward from the earlier uplift review where they still
-  apply; that review's code was not merged, because the current implementation
-  supersedes it.
+- All **96 Python package modules** from the current implementation are included.
+  After line-ending normalization, 94 have identical source text; two differ
+  only by removal of private project/network references in docstrings. No
+  runtime algorithm or security fix is removed for publication.
+- The source includes native community/exact-role readers, attempt and
+  revision-specific outcome/work review, source budgets and cadence evidence,
+  disposable handoff/reissue previews, local workspaces and closed-state
+  recovery, compensation attribution, action-readiness vetoes, verified TLS,
+  validated-IP HTTP connections and the latest daily quality gates.
+- Current regression tests and executable acceptance contracts are included.
+  Private fixtures remain replaced by fictional inputs. Public-only test
+  bootstrap, publication checks, CI and the offline workbench are retained.
+- README/setup/roadmap and focused guides describe shipped behavior and finite
+  remaining work. [The change summary](docs/CHANGES.md) covers the cumulative
+  changes rather than publishing the private handoff ledger.
 
-## Privacy boundary
+## Sanitization boundary
 
-- Explicit file selection; no private Git objects, identity metadata, personal
-  configuration, profile, account or outcome states, delivery ledgers, captures,
-  databases, logs or runtime request ledgers.
-- Root settings are neutral examples with every source, LLM call, V5.5 key and
-  delivery key off.
-- Publication check (`tools/check_publication.py`, folder mode with an exact
-  comparison against the maintainer's private `.env`, including encoded forms):
-  **passed**, 167 files. The 31 reviewed exceptions are individually hash-bound
-  synthetic regression strings or API-documentation placeholders.
-- Additional manual sweeps for personal names, home paths, private project
-  names, private fixtures and real email domains found nothing to remove beyond
-  the edits listed above. New URLs relative to the previous release are
-  synthetic examples plus one public ATS job-board endpoint used in a mocked test.
+- This is an explicit file export onto the existing public history. No private
+  commits, Git objects or private author metadata are merged.
+- Credentials, operator configuration/profile, signup/application/work/payment
+  states, real trust narratives, delivery ledgers, production rows, live captures,
+  digests, logs, cached pages, notebooks, build artifacts and handoff archives are
+  excluded.
+- The root starter asserts no qualifications and disables sources, ingestion,
+  LLM calls, V5.5 production approval and provider delivery. Platform examples
+  contain no real account history or priors.
+- `examples/local/` contains only explicitly fictional demo policies, selected
+  separately. Positive tests opt into those policies; a blank starter also
+  initializes and runs the demo without inventing qualifications.
+- Local state/profile/review/backup paths and workspace markers are ignored and
+  rejected by the publication checker. Exceptions apply only to **39 individually
+  reviewed, path/full-line-hash-bound** synthetic security strings and literal API
+  placeholders. Exact configured private values can never be waived.
 
 ## Verification
 
-- Unit/regression suite with synthetic settings and external network blocked:
-  **1,200 passed, 1 skipped**, in consecutive full runs. The skip is the
-  optional historical live-cache test.
-- Delivery code review: a full review of the outbox, transport and migration
-  modules found ten issues, each reproduced before fixing. Three could stall
-  every later run (a permanently reserved job making staging raise, leases
-  never expiring after a crash, a late legacy crosswalk rolling back each
-  run); others silently held alerts (updates coinciding with a routine
-  policy-fingerprint change, ambiguous legacy matches, later destinations on
-  a channel) or misreported state. All are fixed with regression tests, and a
-  rehearsal on a copy of real delivery history produced no crash and no
-  duplicate sends.
-- `python -m compileall` and `git diff --check`: clean.
-- Acceptance adapter: **100 cases, 0 adapter errors**. Evaluator: **204 of 204
-  assertions pass**. The first export draft found two contracts that the v6
-  changes had regressed (`DOC-03`, a discussion page classified as a vacancy;
-  `OPS-01`, a rate-limited request missing from the HTTP error count). The
-  first fix passed the contracts but an independent code review showed it
-  over-corrected (casual pay words rescued advice threads; broad patterns
-  dropped real roles) and that its HTTP-error change only affected tests.
-  The corrected fix classifies by explicit section headings and advice-style
-  titles, and counts remote HTTP errors where production hydration records
-  them. Every review counter-example is now a test, and replays of two
-  production snapshots keep their original decision fingerprints.
+- Public-copy offline suite: **2,109 passed, 1 skipped**. The skipped test needs a
+  historical live-review cache that is deliberately not distributed. Tests use
+  synthetic policy, blank provider credentials and blocked external sockets.
+- Focused public initialization/recovery and publication controls: **60 passed**,
+  including qualification-free startup, cross-profile isolation, closed backup
+  recovery and the new private workspace-path exclusions.
+- Acceptance adapter: **100 outputs, 0 errors**. Contract evaluator: **100 cases,
+  204 assertions passed**. These assertions apply to the supplied outputs, not
+  live-market performance or provider delivery.
+- Public-folder and exact-index publication checks compare configured private
+  values and common encodings without printing them. Credential formats,
+  credential-bearing URLs/headers, email addresses, home paths, private/generated
+  paths and binary artifacts are checked. The reviewed release has no unresolved
+  findings.
+- Every Python source parses; local Markdown links resolve. The Git diff is
+  whitespace checked before publication. CI installs dependencies into clean
+  Linux/Windows environments for Python 3.12 and 3.13.
 
-These tests are not a live-market, precision/recall or production-rollout
-certification.
+An initial export test exposed incompatible old starter state paths and demo
+interpreter identities. The starter now uses isolated `state/` paths, and the
+explicit synthetic demo clones its interpreter policy without enabling live
+approval or mutating the selected profile. Regression tests cover both fixes.
 
-## Limits
+## Remaining boundaries
 
-The private repository's history is **not cleared for publication**; only this
-explicit file selection is. Review the staged bytes with
-`python tools/check_publication.py --index` before any push. No open-source
-license has been selected. A clean scan cannot detect every unknown secret, and
-normal use creates private files that must stay ignored.
+The private history remains outside the publication boundary. Normal use creates
+private files that must stay excluded; scan the exact staging set before future
+pushes. No scanner can recognize every unknown secret.
+
+Independent recommendation precision/retention, expanded source effectiveness,
+authenticated live outcome integration and selected specification gaps remain
+explicit in [the roadmap](docs/ROADMAP.md). They do not prevent an already
+configured daily digest or the keyless local workflow from running.
+
+No open-source license has been selected. Provider acceptance is not inbox
+receipt, and synthetic previews do not authorize applications, work or spending.

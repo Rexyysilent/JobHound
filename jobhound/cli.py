@@ -217,9 +217,8 @@ async def _run_transport(context, inner_transport=None):
     import httpx
     from .bounded_transport import BoundedTransport, RunBudget
     budget = RunBudget(context, _production_limits(context.config()))
-    transport = BoundedTransport(
-        inner_transport or httpx.AsyncHTTPTransport(retries=0), budget
-    )
+    from .public_http import PublicHTTPTransport
+    transport = BoundedTransport(inner_transport or PublicHTTPTransport(), budget)
     try:
         yield transport
     finally:
@@ -514,11 +513,15 @@ def cmd_review_outcomes(args: argparse.Namespace) -> None:
         if as_of.tzinfo is None:
             raise ValueError('as_of_requires_timezone')
         output, manifest = run_outcome_review(args.snapshot, args.events, args.bindings,
-            args.output_dir, as_of=as_of, previous_events=args.previous_events)
+            args.output_dir, as_of=as_of, previous_events=args.previous_events, aliases_path=args.aliases,
+            handoff_signal=getattr(args,'handoff_signal',False),delivery_state=getattr(args,'delivery_state',None),
+            reissue_plan_path=getattr(args,'reissue_plan',None))
     except ValueError:
         raise SystemExit('Outcome review rejected invalid inputs or an unsafe/existing output directory; inspect the documented contract.') from None
     print(f"Offline outcome preview: {output / 'preview.md'}")
     print(f"Import accounting: {manifest['import_counts']}")
+    if 'handoff_signal_review' in manifest:
+        print(f"Disposable signal receipt: {output / 'signal-receipt.json'}")
 
 
 def cmd_feedback(args: argparse.Namespace) -> None:
@@ -675,6 +678,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jobhound",
                                      description="jobhound — remote job discovery")
     sub = parser.add_subparsers(dest="command")
+    from .local_cli import configure_parser
+    configure_parser(sub.add_parser('local',help='keyless local setup, demo, diagnostics and recovery'))
 
     p_run = sub.add_parser("run", help="fetch, rank, digest, notify")
     p_run.add_argument("--dry-run", action="store_true", help="write output, don't notify")
@@ -718,6 +723,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_outcomes.add_argument('--bindings', required=True)
     p_outcomes.add_argument('--as-of', required=True, help='explicit timezone-aware evidence/review time')
     p_outcomes.add_argument('--previous-events', help='previous validated review journal for idempotent imports')
+    p_outcomes.add_argument('--aliases', help='reviewed exact canonical migration JSONL; unresolved bindings are held')
+    p_outcomes.add_argument('--handoff-signal', action='store_true', help='prepare bounded signals in a disposable review DB; never send')
+    p_outcomes.add_argument('--delivery-state', help='prior marked disposable delivery.sqlite to copy; requires --handoff-signal')
+    p_outcomes.add_argument('--reissue-plan', help='explicit reviewed JSON plan bound to the prior disposable state; no sending')
     p_outcomes.add_argument('--output-dir', required=True, help='NEW nonproduction review directory')
     p_outcomes.set_defaults(func=cmd_review_outcomes)
 
@@ -761,12 +770,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-_COMMANDS = {"run", "replay", "review", "feedback", "trust", "join", "show-rejected"}
+_COMMANDS = {"run", "replay", "review", "feedback", "trust", "join", "show-rejected", "local"}
 
 
 def main(argv: list[str] | None = None) -> None:
     import sys
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1]==['local']:
+        from .local_cli import main as local_main
+        return local_main(argv[1:])
     # Back-compat: bare flags (or nothing) mean `run`. `--show-rejected` predates
     # the subcommand and keeps working.
     if "--show-rejected" in argv:

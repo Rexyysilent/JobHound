@@ -1,0 +1,39 @@
+# Fictional offline demo only; not an operator profile.
+# Offline example. This does not establish qualifications or enable collection.
+engine:
+  active: v4.2
+v55:
+  enabled: true
+  production_approved: false
+  community_buyer_activity_max_age_days: 60
+  account_states: []
+delivery:
+  enabled: false
+  production_approved: false
+  workspace_id: local-review
+  profile_id: local-example
+sources:
+  remotive: {enabled: false}
+  remoteok: {enabled: false}
+  arbeitnow: {enabled: false}
+  adzuna: {enabled: false}
+  jsearch: {enabled: false}
+  ats: {enabled: false}
+  serp: {enabled: false}
+email_ingest: {enabled: false}
+incidents: {enabled: false}
+scam:
+  llm: {enabled: false}
+trust:
+  registry_file: platform_registry.yaml
+v41:
+  sidecar_db: state/jobhound_v41.db
+  snapshot_dir: state/snapshots
+region:
+  worldwide_terms: [worldwide, globally, anywhere]
+  india_terms: [India]
+  lang_terms: [English]
+relevance:
+  keywords:
+    boost_high: [AI evaluation, response evaluation]
+    boost_lang: [English]

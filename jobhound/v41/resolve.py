@@ -101,26 +101,8 @@ class _HrefParser(HTMLParser):
 
 
 def _safe_public_http(url: str) -> bool:
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return False
-    if parts.scheme not in {"http", "https"}:
-        return False
-    host = (parts.hostname or "").casefold()
-    if not host or host == "localhost" or host.endswith(".localhost"):
-        return False
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return True
-    return not (
-        address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_reserved
-        or address.is_multicast
-    )
+    from .hydration import _safe_public_http as safe_public_http
+    return safe_public_http(url)
 
 
 def _is_ats_host(host: str) -> bool:
@@ -196,10 +178,12 @@ async def resolve_url(
     trail = [current]
 
     async def request(method: str, target: str, **kwargs) -> httpx.Response:
+        from ..public_http import require_public_transport
         response: httpx.Response | None = None
         for attempt in range(max(0, max_retries) + 1):
             if request_gate is not None:
                 await request_gate(target)
+            require_public_transport(client, target)
             response = await client.request(method, target, **kwargs)
             if response.status_code != 429 or attempt >= max(0, max_retries):
                 return response
@@ -312,6 +296,8 @@ async def hydrate_ats_url(
         return Hydration()
     slug, posting_id = segments[0], segments[1]
     try:
+        from ..public_http import require_public_transport
+        require_public_transport(client, _ASHBY_API.format(slug=slug))
         response = await client.get(
             _ASHBY_API.format(slug=slug),
             params={"includeCompensation": "true"},
@@ -369,7 +355,9 @@ def _collapse_exact_final_urls(result: RunResult) -> int:
         result.evaluated,
         key=lambda row: row.decision.priority_key.sort_tuple,
     ):
-        key = public_url(item.job.url).rstrip("/").casefold()
+        key = public_url(item.job.url).rstrip("/")
+        if not CONFIG.v55.enabled:
+            key = key.casefold()
         if not key or key not in by_url:
             if key:
                 by_url[key] = item
@@ -443,8 +431,11 @@ async def resolve_result_urls(result: RunResult) -> int:
             if remaining > 0:
                 await asyncio.sleep(remaining)
             adzuna_last_request = loop.time()
+    from ..public_http import PublicHTTPTransport
     async with httpx.AsyncClient(
         timeout=timeout,
+        transport=PublicHTTPTransport(),
+        trust_env=False,
         headers={"User-Agent": CONFIG.http.user_agent},
         follow_redirects=False,
     ) as client:
@@ -584,6 +575,12 @@ async def resolve_result_urls(result: RunResult) -> int:
     return changed
 
 
+def _community_probe(row):
+    from .community import bounded_workflow_probe
+    return (set(row.assessment.blockers) <= {'role_mismatch', 'low_evidence'}
+            and bounded_workflow_probe(row.job.url, row.job.title))
+
+
 async def hydrate_result(
     result: RunResult,
     *,
@@ -655,8 +652,8 @@ async def hydrate_result(
     reserve = min(len(eligible), math.ceil(policy.shortlist * getattr(getattr(CONFIG, "v55", None), "soft_reject_reserve_fraction", .1)))
     rejected = [row for row in eligible
                 if row.decision.action_band == ActionBand.REJECT
-                and not row.assessment.blockers
-                and bool(row.assessment.unresolved)][:reserve]
+                and ((not row.assessment.blockers and bool(row.assessment.unresolved))
+                     or _community_probe(row))][:reserve]
     primary_pool = [row for row in eligible if row.decision.action_band != ActionBand.REJECT]
     # Deterministic source round-robin prevents one provider consuming the run.
     buckets: dict[str, list] = {}
@@ -672,9 +669,11 @@ async def hydrate_result(
     health.skipped = max(0, len(result.evaluated) - len(candidates))
     semaphore = asyncio.Semaphore(max(1, policy.concurrency))
     timeout = httpx.Timeout(min(30.0, policy.time_budget_seconds))
+    from ..public_http import PublicHTTPTransport
     async with httpx.AsyncClient(
         timeout=timeout,
-        transport=transport,
+        transport=transport or PublicHTTPTransport(),
+        trust_env=False,
         headers={"User-Agent": CONFIG.http.user_agent},
         follow_redirects=False,
     ) as client:
@@ -700,9 +699,15 @@ async def hydrate_result(
                             public_url=target, error=error,
                         ), resolution_trail
                     target = resolved
-                outcome = await hydrate_public_posting(
-                    target, item.job, client=client, budget=budget
-                )
+                try:
+                    outcome = await hydrate_public_posting(
+                        target, item.job, client=client, budget=budget
+                    )
+                except (ValueError, TypeError, KeyError, AttributeError,
+                        OverflowError, RecursionError) as exc:
+                    outcome = HydrationResult(
+                        state='failed', public_url=target, request_url=target,
+                        error='invalid_hydration_content_' + type(exc).__name__)
                 return item, parent, outcome, resolution_trail
         outcomes = await asyncio.gather(*(one(item) for item in candidates))
 
@@ -728,6 +733,13 @@ async def hydrate_result(
         accepted = (outcome.state in {"complete", "partial"}
                     and outcome.job is not None
                     and outcome.identity_state in {"exact", "corroborated"})
+        if accepted and outcome.state == 'partial':
+            health.partial += 1
+            adapter_row['partial'] = adapter_row.get('partial', 0) + 1
+            code = outcome.error or 'incomplete_content'
+            health.error_codes[code] = health.error_codes.get(code, 0) + 1
+            if not is_remote_http_error(code):
+                adapter_row['error_codes'][code] = adapter_row['error_codes'].get(code, 0) + 1
         if outcome.state == "deferred":
             health.deferred += 1
             adapter_row["deferred"] += 1
@@ -738,14 +750,15 @@ async def hydrate_result(
             health.fail(code)
             adapter_row["failed"] += 1
         prior_cycles = budget.verification_cycles.get(cycle_key, 0)
-        cycles = 0 if accepted else prior_cycles + 1
+        fully_verified = accepted and outcome.state == 'complete'
+        cycles = 0 if fully_verified else prior_cycles + 1
         budget.verification_cycles[cycle_key] = cycles
-        if accepted:
+        if fully_verified:
             budget.verification_next_check.pop(cycle_key, None)
             budget.verification_first_failed.pop(cycle_key, None)
         else:
             budget.verification_first_failed.setdefault(cycle_key, result.metadata.as_of.timestamp())
-        if not accepted and cycles >= max_cycles:
+        if not fully_verified and cycles >= max_cycles:
             budget.verification_next_check[cycle_key] = (
                 result.metadata.as_of + timedelta(days=watch_days)
             ).timestamp()
@@ -822,7 +835,7 @@ async def hydrate_result(
     stage = {
         "source": "retrieval",
         "transport_host": "multiple",
-        "status": "partial" if health.failed or health.deferred else ("ok" if health.succeeded else "empty"),
+        "status": "partial" if health.failed or health.deferred or health.partial else ("ok" if health.succeeded else "empty"),
         "stage": health.stage,
         "attempted": health.attempted,
         "succeeded": health.succeeded,
@@ -832,10 +845,11 @@ async def hydrate_result(
         "request_count": budget.requests,
         "error_codes": health.error_codes,
         "remote_http_errors": health.remote_http_errors,
+        "partial": health.partial,
     }
     rows = []
     for row in adapter_health.values():
-        row["status"] = "partial" if row["failed"] or row["deferred"] else (
+        row["status"] = "partial" if row["failed"] or row["deferred"] or row.get('partial') else (
             "ok" if row["succeeded"] else "empty"
         )
         rows.append(row)

@@ -1,0 +1,21 @@
+# Fictional offline demo only; not an operator profile.
+# Synthetic demo policy. Replace claims with your own supported facts for review.
+languages: [English]
+working_languages: [English]
+credential_domains: []
+formal_credentials: []
+absent_formal_credentials: []
+documented_professional_years: {}
+anchors: [English, response evaluation]
+demonstrated_skills: [response evaluation]
+capability_domains: [AI evaluation]
+target_lanes: [ai_evaluation]
+role_concepts:
+  ai_evaluation: [response evaluator, AI responses, response evaluation]
+role_priorities: {ai_evaluation: 5}
+allowed_seniority: [entry, junior, mid]
+max_required_years: 0
+eligibility:
+  known_languages: [English, Bengali, French, German, Hindi]
+  gated_role_patterns: {}
+  no_anchor_fit_cap: 30

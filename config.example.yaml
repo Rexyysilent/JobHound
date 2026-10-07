@@ -35,6 +35,8 @@ scam:
 # V5.5 decision policy with v6 fetching. `run` uses it only when BOTH keys are
 # true; otherwise the legacy V4.2 engine runs. See README "Turning on V5.5".
 v55:
+  # Native buyer activity, not seller replies or a fresh crawl, renews demand.
+  community_buyer_activity_max_age_days: 60
   enabled: false
   production_approved: false
   # Full cards per band (the code default is 3). Eligible jobs beyond the
@@ -44,7 +46,7 @@ v55:
   # One bounded HTTP budget per run, shared by discovery and page hydration.
   production_fetch:
     workspace: runtime/v6       # request ledger + verification history (ignored by Git)
-    requests: 200               # a full run typically makes ~55-80 discovery requests
+    requests: 200               # shared request ceiling, not a coverage guarantee
     seconds: 600
     request_seconds: 60
     wire_bytes: 16000000        # per response, on the wire
@@ -68,6 +70,9 @@ region:
   - remote
   india_terms: []
   lang_terms: []
+v41:
+  sidecar_db: state/jobhound_v41.db
+  snapshot_dir: state/snapshots
 relevance:
   keywords:
     boost_high:

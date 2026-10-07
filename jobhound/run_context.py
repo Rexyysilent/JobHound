@@ -45,6 +45,7 @@ class RunContext:
     run_id: str
     network_allowed: bool = False
     side_effects_allowed: bool = False
+    versions_json: str = '{}'
 
     @classmethod
     def capture(cls, *, config=None, profile=None, registry=None, as_of=None,
@@ -59,10 +60,11 @@ class RunContext:
         now = as_of or datetime.now(timezone.utc)
         if now.tzinfo is None:
             raise ValueError('run clock must be timezone-aware')
+        from .versions import runtime_versions
         return cls(_json(config.model_dump(mode='json')), _json(asdict(profile)),
                    _json({k: v.model_dump(mode='json') for k, v in registry.items()}),
                    now, str(Path(workspace).resolve()), run_id or uuid4().hex,
-                   network_allowed, side_effects_allowed)
+                   network_allowed, side_effects_allowed, _json(runtime_versions()))
 
     def config(self):
         from .config import Config
@@ -82,7 +84,7 @@ class RunContext:
 
     def fingerprint(self):
         return hashlib.sha256((self.config_json+self.profile_json+self.registry_json+
-                               self.as_of.isoformat()).encode()).hexdigest()
+                               self.as_of.isoformat()+self.versions_json).encode()).hexdigest()
 
 
 @contextmanager

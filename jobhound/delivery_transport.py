@@ -6,6 +6,7 @@ No production migration, scheduler hook, or automatic backlog drain lives here.
 """
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 import sqlite3
@@ -94,8 +95,23 @@ def render_envelope(rows, *, now=None):
     from .v41.provenance import sanitize_payload
     sections = {'Apply / act first': [], 'Worth a bounded check': [],
                 'Status updates': [], 'Coverage updates': []}
-    for row in rows:
-        payload = sanitize_payload(json.loads(row['payload']))
+    payloads = [sanitize_payload(json.loads(row['payload'])) for row in rows]
+    handoff = any(payload.get('kind') in {'handoff_card', 'handoff_status'} for payload in payloads)
+    if handoff:
+        from .handoff_signal import SIGNAL_SCHEMA, compact_status
+        lanes = Counter()
+        for payload in payloads:
+            if payload.get('kind') == 'coverage':
+                continue
+            if payload.get('signal_schema') != SIGNAL_SCHEMA or payload.get('kind') not in {'handoff_card', 'handoff_status'}:
+                raise ValueError('handoff envelope cannot mix legacy opportunity payloads')
+            lane = payload.get('signal_lane')
+            if lane not in {'action', 'verify', 'status'} or (payload['kind'] == 'handoff_status') != (lane == 'status'):
+                raise ValueError('invalid handoff presentation lane')
+            lanes[lane] += 1
+        if lanes['action'] > 5 or lanes['verify'] > 2 or lanes['status'] > 3:
+            raise ValueError('handoff envelope exceeds bounded action/status limits')
+    for payload in payloads:
         if payload.get('kind') == 'coverage':
             health = payload['health']
             scope = health.get('stage') or 'discovery'
@@ -105,14 +121,24 @@ def render_envelope(rows, *, now=None):
                 f"{health.get('source', 'source')} [{scope}]: {health.get('status', 'unknown')} "
                 f"({health.get('error_type') or 'no error type'}). Not a claim that jobs closed.")
             continue
+        if payload.get('kind') == 'handoff_status':
+            sections['Status updates'].append(compact_status(payload))
+            continue
         item = SimpleNamespace(job=Job.model_validate(payload['job']),
             assessment=Assessment.model_validate(payload['assessment']),
             decision=Decision.model_validate(payload['decision']))
         decision = item.decision
-        section = ('Status updates' if decision.lifecycle != 'active' or decision.action_band.value == 'reject'
+        section = ('Apply / act first' if payload.get('kind') == 'handoff_card' and payload.get('signal_lane') == 'action'
+                   else 'Status updates' if decision.lifecycle != 'active' or decision.action_band.value == 'reject'
                    else 'Apply / act first' if decision.action_band.value == 'primary'
                    else 'Worth a bounded check')
-        sections[section].append(_release_entry(item))
+        entry = _release_entry(item)
+        if payload.get('kind') == 'handoff_card' and decision.next_action == 'start_allocated_task':
+            plan = item.assessment.account_state.get('_reviewed_work_action') or {}
+            terms = plan.get('terms')
+            if isinstance(terms, dict):
+                entry += f"\n  Reviewed allocated-work terms: {terms['currency']} {terms['amount']} per {terms['unit'].replace('_', ' ')}."
+        sections[section].append(entry)
     card_count = len(sections['Apply / act first']) + len(sections['Worth a bounded check'])
     lines = [_subject_line(card_count, len(sections['Status updates']), now),
              'JobHound V6 digest. Frozen queue selection; provider acceptance does not establish inbox arrival.', '']
@@ -120,7 +146,8 @@ def render_envelope(rows, *, now=None):
         if entries:
             if name == 'Coverage updates':
                 entries = compact_coverage(entries)
-            lines.extend([name, '', '\n\n'.join(entries), ''])
+            separator = '\n' if handoff and name == 'Status updates' else '\n\n'
+            lines.extend([name, '', separator.join(entries), ''])
     return '\n'.join(lines)
 
 
@@ -130,6 +157,8 @@ OVERFLOW_EMAIL_LINES = 40
 
 def is_card_payload(payload):
     """A job card (not a status update or coverage line), as render_envelope files it."""
+    if isinstance(payload, dict) and payload.get('kind') in {'handoff_card', 'handoff_status'}:
+        return payload['kind'] == 'handoff_card'
     decision = payload.get('decision') if isinstance(payload, dict) else None
     return (payload.get('kind') != 'coverage' and isinstance(decision, dict)
             and decision.get('lifecycle') == 'active' and decision.get('action_band') != 'reject')
@@ -534,15 +563,8 @@ class DigestTransport:
                 raise ValueError('explicit notification-generation migration required')
             owned_ids = set()
             for envelope in envelopes:
-                row = self._owned(envelope)
-                parts = self._parts(envelope)
-                if row['status'] not in {'pending','abandoned','cancelled'} or not parts:
-                    raise ValueError('draft is not provably unsent')
-                if any(p['attempts'] != 0 or p['status'] != 'pending' for p in parts):
-                    raise ValueError('an attempted draft cannot be recomposed')
-                if self.conn.execute("SELECT 1 FROM delivery_part_events WHERE envelope=? AND (attempt!=0 OR event!='abandoned')", (envelope,)).fetchone():
-                    raise ValueError('draft has provider-attempt evidence')
-                owned_ids.update(i['id'] for i in self._items(envelope))
+                members=self.prove_unsent_draft(envelope)
+                owned_ids.update(i['id'] for i in members)
             if not set(ids) <= owned_ids:
                 raise ValueError('selected intent is outside the reviewed drafts')
             rows = [self.box._owned(i) for i in ids]
@@ -576,6 +598,32 @@ class DigestTransport:
                 self.box._event(new_id, 'reviewed_unsent_replacement', evidence=evidence, now=now)
                 reissued.append(new_id)
             return reissued
+
+    def prove_unsent_draft(self,envelope,*,allowed_statuses=('pending','abandoned','cancelled')):
+        """Whole-draft proof shared by review retirement and explicit reissue.
+
+        Obsolete/unselected members can carry older per-intent receipts even
+        when this transport draft has zero part attempts. Never erase that
+        history by checking only the current selection or envelope parts.
+        """
+        row=self._owned(envelope);parts=self._parts(envelope);members=self._items(envelope)
+        if row['status'] not in allowed_statuses or not parts or not members:
+            raise ValueError('draft is not provably unsent')
+        if any(p['attempts']!=0 or p['status']!='pending' for p in parts):
+            raise ValueError('an attempted draft cannot be recomposed')
+        if self.conn.execute("SELECT 1 FROM delivery_part_events WHERE envelope=? AND (attempt!=0 OR event!='abandoned')",(envelope,)).fetchone():
+            raise ValueError('draft has provider-attempt evidence')
+        for item in members:
+            receipt=self.conn.execute('''SELECT 1 FROM delivery_attempt_events WHERE intent=?
+                AND (attempt>0 OR event IN ('send_started','accepted','uncertain','not_sent','permanent_failure'))''',
+                (item['id'],)).fetchone()
+            baseline=self.conn.execute('''SELECT 1 FROM delivery_baselines WHERE workspace=? AND profile=?
+                AND subject=? AND channel=? AND destination=? AND revision=?''',
+                (self.box.workspace,self.box.profile,item['subject'],item['channel'],item['destination'],item['revision'])).fetchone()
+            if (item['attempts']!=0 or item['status'] in {'leased','sending','accepted','uncertain','legacy_hold'}
+                    or receipt or baseline):
+                raise ValueError('draft member has provider-attempt or receipt evidence')
+        return members
 
 
 async def dispatch_envelope(transport, envelope, notifier, *, confirm_target, confirm_body,

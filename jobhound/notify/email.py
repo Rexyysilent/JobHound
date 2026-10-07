@@ -1,5 +1,5 @@
-"""Email digest delivery (Gmail SMTP) — the channel that actually works here:
-api.telegram.org is ISP-blocked on this network, smtp.gmail.com is not.
+"""Optional email digest delivery (Gmail SMTP).
+SMTP delivery is an optional alternative to Telegram.
 
 Needs EMAIL_SMTP_USER + EMAIL_APP_PASSWORD in .env (a Gmail *app password*,
 not the account password — requires 2-Step Verification, generated at
@@ -107,7 +107,8 @@ class EmailNotifier(Notifier):
         return await asyncio.to_thread(self._send_receipt_sync, text, delivery_key)
 
     def _send_sync(self, msg: EmailMessage) -> None:
-        with smtplib.SMTP_SSL(_HOST, _PORT, timeout=30) as smtp:
+        with smtplib.SMTP_SSL(_HOST, _PORT, timeout=30,
+                              context=ssl.create_default_context()) as smtp:
             smtp.login(self.user, self.password)
             smtp.send_message(msg)
 

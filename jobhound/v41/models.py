@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from ..models import Job
 from .outcomes import OutcomeProjection
@@ -101,6 +101,8 @@ class PayCandidate(BaseModel):
     source_span_start: int | None = None
     source_span_end: int | None = None
     source_text_sha256: str | None = None
+    structured_path: str | None = None
+    structured_payload_sha256: str | None = None
     source_section: str = "unknown"
     actor: str = "unknown"
     guaranteed_minimum: float | None = None
@@ -220,15 +222,26 @@ class PriorityKey(BaseModel):
     action_readiness: int = 0
     supported_time_to_cash: float = 0
     action_cost_and_friction: int = 0
+    supported_urgency: int = 0
+    supported_deadline_order: int = 0
+    substantive_buyer_update: int = 0
+
+    @model_serializer(mode='wrap')
+    def retain_legacy_priority_shape(self,handler):
+        data=handler(self)
+        for key in ('supported_urgency','supported_deadline_order','substantive_buyer_update'):
+            if data.get(key)==0:data.pop(key)
+        return data
 
     @property
-    def semantic_tuple(self) -> tuple[int, int, int, int, int, int, int, int, str]:
+    def semantic_tuple(self) -> tuple[int | float | str, ...]:
         if self.policy_version == "v5.0.0-rc1":
             # Task fit comes before action cost: a marketplace bid cost is
             # never verified up front, so cost-first ranked every Upwork job
             # below every other job regardless of fit (2026-09-30 email).
             return (
-                self.action_readiness, self.supported_time_to_cash,
+                self.supported_urgency,self.supported_deadline_order,
+                self.action_readiness,self.substantive_buyer_update,self.supported_time_to_cash,
                 self.match_strength, self.role_priority,
                 self.action_cost_and_friction, self.economics_quality,
                 self.explicit_profile_language_edge, self.source_actionability,
@@ -247,7 +260,7 @@ class PriorityKey(BaseModel):
         )
 
     @property
-    def sort_tuple(self) -> tuple[int, int, int, int, int, int, int, int, str]:
+    def sort_tuple(self) -> tuple[int | float | str, ...]:
         """Ascending key: semantic components descend, stable ID ascends."""
         if self.policy_version == "v5.0.0-rc1":
             values = self.semantic_tuple
@@ -311,6 +324,7 @@ class CanonicalJob(BaseModel):
     corroborated_by: list[str] = Field(default_factory=list)
     canonicalization_reason: str = ""
     outcome_projection: OutcomeProjection | None = None
+    outcome_binding_hold: Literal['multiple_active_attempts_for_one_canonical'] | None = None
 
     @property
     def best_observation(self) -> ListingObservation:
@@ -412,6 +426,8 @@ class RunMetadata(BaseModel):
     trust_registry_hash: str
     config_hash: str
     snapshot_path: str | None = None
+    runtime_versions: dict[str, Any] = Field(default_factory=dict)
+    input_sha256: str | None = None
 
 
 class RunResult(BaseModel):

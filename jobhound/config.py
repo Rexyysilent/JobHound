@@ -338,6 +338,7 @@ class V55Cfg(BaseModel):
     verification_ttl_hours: int = Field(default=48, gt=0)
     marketplace_ttl_hours: int = Field(default=24, gt=0)
     unresolved_copy_max_age_days: int = Field(default=30, gt=0)
+    community_buyer_activity_max_age_days: int = Field(default=60, gt=0)
     max_automatic_cycles: int = Field(default=2, ge=1)
     # Failed automatic checks alone do not hide a job: it moves to watch only
     # once the posting (or, undated, the first failed check) is this old.
@@ -356,8 +357,8 @@ class DeliveryCfg(BaseModel):
 
     enabled: bool = False
     production_approved: bool = False
-    workspace_id: str = "jobhound"
-    profile_id: str = "default"
+    workspace_id: str = "jobhound-production"
+    profile_id: str = "souparna"
     card_cap: int = Field(default=15, ge=0, le=100)
     status_cap: int = Field(default=5, ge=0, le=100)
     max_parts_per_run: int = Field(default=32, ge=1, le=32)
@@ -387,10 +388,12 @@ class Config(BaseModel):
 
 
 def load_config(path: Path | str | None = None) -> Config:
-    p = Path(path) if path else _CONFIG_PATH
+    from .local_paths import current_local
+    local=current_local()
+    p = Path(path) if path else local.policy_dir/'config.yaml' if local else _CONFIG_PATH
     # Public distributions contain only non-personal, disabled-by-default
     # examples. An installed operator's config continues to take precedence.
-    if path is None and not p.exists():
+    if path is None and not local and not p.exists():
         p = p.with_name("config.example.yaml")
     if not p.exists():
         return Config()

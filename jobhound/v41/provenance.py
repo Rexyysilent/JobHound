@@ -362,6 +362,8 @@ def _marketplace_counterparty(job: Job, platform_key: str) -> str | None:
 
 def counterparty_key(job: Job) -> str:
     """Stable identity shared by clustering, trust and digest caps."""
+    if job.source == 'community_thread':
+        return 'community-request:' + public_url(job.url)
     platform_key = job.platform_key or default_matcher().match(job.company)
     if platform_key:
         marketplace_key = _marketplace_counterparty(job, platform_key)
@@ -434,7 +436,9 @@ def canonicalize_observations(
         title = _norm(observation.job.title)
         location = _norm(observation.job.location)
         normalized[observation.observation_id] = (title, location)
-        exact_url = public_url(observation.normalized_url).rstrip("/").casefold()
+        exact_url = public_url(observation.normalized_url).rstrip("/")
+        if not CONFIG.v55.enabled:
+            exact_url = exact_url.casefold()
         if exact_url and exact_url in clusters_by_url and (
             not CONFIG.v55.enabled or (
                 title == normalized[clusters_by_url[exact_url][0].observation_id][0]
@@ -460,9 +464,11 @@ def canonicalize_observations(
             if CONFIG.v55.enabled:
                 same_title = title == kept_title
                 compatible_location = location == kept_location
-                kept_url = public_url(kept.normalized_url).rstrip('/').casefold()
-                if observation.source_kind == SourceKind.ORIGINAL_ATS and kept.source_kind == SourceKind.ORIGINAL_ATS:
-                    same_title = same_title and exact_url == kept_url
+                kept_url = public_url(kept.normalized_url).rstrip('/')
+                # Identical employer/title/location is not a requisition key.
+                # Different public URLs need accepted original-page lineage,
+                # which is merged separately below; copies cannot guess it.
+                same_title = same_title and bool(exact_url) and exact_url == kept_url
             if same_title and compatible_location:
                 cluster.append(observation)
                 if exact_url:

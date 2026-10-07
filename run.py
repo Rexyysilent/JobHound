@@ -16,7 +16,15 @@ try:
 except (AttributeError, ValueError):
     pass
 
-from jobhound.cli import main
+def main(argv=None):
+    args=list(sys.argv[1:] if argv is None else argv)
+    # Establish local isolation before importing modules that load operator settings.
+    if args[:1]==['local']:
+        from jobhound.local_cli import main as local_main
+        return local_main(args[1:])
+    from jobhound.cli import main as legacy_main
+    return legacy_main(args)
 
 if __name__ == "__main__":
-    main()
+    result=main()
+    if result is not None:raise SystemExit(result)

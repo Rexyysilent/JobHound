@@ -102,7 +102,9 @@ CREATE TRIGGER delivery_revisions_no_delete BEFORE DELETE ON delivery_revisions
 def transaction(conn):
     """Composable transactions: never commit a caller's revision/run half-write."""
     from .run_context import deny_review_side_effect
-    deny_review_side_effect('delivery persistence')
+    from .local_paths import local_review_connection_allowed
+    if not local_review_connection_allowed(conn):
+        deny_review_side_effect('delivery persistence')
     nested = conn.in_transaction
     savepoint = 'delivery_' + uuid.uuid4().hex
     conn.execute('SAVEPOINT ' + savepoint if nested else 'BEGIN IMMEDIATE')
@@ -604,7 +606,16 @@ def overflow_entry(item):
                                                    item.assessment.source_actionability) or '')})
 
 
-def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_cap):
+def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_cap,
+                       handoff_signal=False):
+    if handoff_signal:
+        from .handoff_signal import stage_handoff_signals
+        return stage_handoff_signals(outbox, result, destinations, now=now,
+                                     card_cap=card_cap, status_cap=status_cap)
+    if outbox.conn.execute('''SELECT 1 FROM delivery_subjects s JOIN delivery_revisions r ON r.id=s.revision
+        WHERE s.workspace=? AND s.profile=? AND json_extract(r.material,'$.schema')='jobhound-material-action/v2'
+        LIMIT 1''', (outbox.workspace, outbox.profile)).fetchone():
+        raise ValueError('restore the pre-handoff review database before returning to legacy delivery')
     from .v41.digest import build_digest, release_order_key
     from .v41.provenance import sanitize_payload
     if not outbox.conn.in_transaction:
@@ -635,7 +646,11 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                                            run_id=result.metadata.run_id,as_of=as_of,now=now)
         if item.decision.action_band.value != 'reject' and item.decision.lifecycle == 'active':
             active.append(item)
-        elif item.canonical.outcome_projection is not None:
+        elif item.canonical.outcome_projection is not None or outbox.conn.execute(
+            '''SELECT 1 FROM delivery_baselines
+               WHERE workspace=? AND profile=? AND subject=? LIMIT 1''',
+            (outbox.workspace, outbox.profile, outbox.subject(identity)),
+        ).fetchone():
             statuses.append(item)
     ledgers = []
     entries = {}                    # overflow lines are built once, shared by destinations
@@ -648,6 +663,17 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
         available = []
         policy_changed = 0          # informational; 'policy_review' counts holds (none now)
         for item in [*active,*statuses]:
+            if item.canonical.canonical_id not in active_ids and item.canonical.outcome_projection is None:
+                # Public closure/blocking updates belong only to destinations
+                # that accepted an earlier version of this opening.
+                delivered = outbox.conn.execute(
+                    '''SELECT 1 FROM delivery_baselines WHERE workspace=? AND profile=?
+                       AND subject=? AND channel=? AND destination=?''',
+                    (outbox.workspace, outbox.profile, outbox.subject(item.canonical.canonical_id), target.channel, target.key),
+                ).fetchone()
+                if delivered is None:
+                    counts['ineligible'] += 1
+                    continue
             revision = revisions[item.canonical.canonical_id]
             cause = outbox.conn.execute('SELECT cause FROM delivery_revisions WHERE id=?',(revision,)).fetchone()[0]
             exists = outbox.conn.execute('SELECT 1 FROM delivery_intents WHERE revision=? AND channel=? AND destination=?',
@@ -703,6 +729,13 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                                  'selected':len(selected),'listed':len(cards)-len(selected)},
                         'card_intent_ids':intent_ids[:len(selected)],
                         'overflow':[entries[item.canonical.canonical_id] for item in overflow]})
+    stage_coverage_updates(outbox, result, targets, ledgers, policy, as_of,
+                           now=now, status_cap=status_cap)
+    return {'run_id':result.metadata.run_id,'destinations':ledgers,'revisions':revisions}
+
+
+def stage_coverage_updates(outbox, result, targets, ledgers, policy, as_of, *, now, status_cap):
+    from .v41.provenance import sanitize_payload
     # Operational state has a separate capped stream and denominator, not fake jobs.
     health_revisions = []
     seen_scopes = set()
@@ -739,7 +772,6 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                     (revision, target.channel, target.key),
                 ).fetchone()[0])
         ledger['coverage'] = coverage
-    return {'run_id':result.metadata.run_id,'destinations':ledgers,'revisions':revisions}
 
 
 async def dispatch_fake(outbox, destination, sender, *, now):

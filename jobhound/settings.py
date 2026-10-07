@@ -66,4 +66,7 @@ class Settings(BaseSettings):
         return bool(self.rapidapi_key)
 
 
-settings = Settings()
+from .local_paths import current_local
+
+# A local command never reads dotenv or inherits provider credentials.
+settings = Settings.model_construct() if current_local() else Settings()

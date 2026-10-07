@@ -109,6 +109,7 @@ async def ingest_raw_with_health(
         timeout=CONFIG.http.timeout_seconds,
         follow_redirects=not bool(current_run()),
         transport=transport,
+        trust_env=False,
     ) as client:
         async def fetch_one(source):
             batch = await source.fetch(client)
