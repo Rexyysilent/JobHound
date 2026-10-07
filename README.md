@@ -88,8 +88,10 @@ Native Make/n8n thread readers and exact public Turing/micro1 role readers are
 included. Threads separate the buyer from sellers, quotes and unrelated
 replies; exact-role readers distinguish a real role from a JavaScript shell.
 These are bounded evidence readers, not a claim of complete platform coverage.
-Native role readers keep application dropdowns, form controls and navigation
-out of language and pay evidence; genuine role requirements remain enforced.
+Native role readers, V5.5 ATS HTML feeds and generic JobPosting hydration keep
+application dropdowns, form controls and navigation out of role evidence.
+Form text cannot close a generic role; genuine requirements and closure notices
+remain enforced. Captured provider fields remain separate from cleaned text.
 The optional [source policy](docs/source_policy.md) records admission, cadence,
 inspection cost and adequately covered checks before expanding a source.
 

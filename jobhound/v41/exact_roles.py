@@ -13,14 +13,10 @@ import re
 from urllib.parse import urlsplit
 
 from ..models import Job
+from ..document_regions import role_control
 from .models import SourceKind
 
 class NativeError(ValueError):pass
-
-# Visible application controls/navigation are document evidence, not role copy.
-_NON_ROLE_TAGS={'form','fieldset','legend','label','input','select','option',
-                'optgroup','datalist','textarea','button','nav'}
-_NON_ROLE_ARIA={'form','navigation','listbox','combobox','radiogroup','textbox','button','menu','menuitem'}
 
 @dataclass
 class Node:
@@ -41,7 +37,7 @@ class Node:
     def role_visible(self):
         node=self
         while node is not None:
-            if node.tag in _NON_ROLE_TAGS or set(node.attrs.get('role','').casefold().split()) & _NON_ROLE_ARIA:
+            if role_control(node.tag,node.attrs):
                 return False
             node=node.parent
         return self.visible
