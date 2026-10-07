@@ -26,8 +26,8 @@ example is complete. See [the change summary](CHANGES.md) and
 
 | Work | Completion condition |
 | --- | --- |
-| Remaining source-specific behavior | Engine-path fixtures and provenance for reminder/completion extraction, cross-capture buyer closure/edit history, payout feasibility, form segmentation, dated language conflicts, bounced contacts and forum competition |
-| Independent recommendation quality | Freeze at least 100 independently labeled records with 20 actionable positives; measure at least 95% Primary precision, 90% positive retention, zero known critical leaks and complete material-claim support |
+| Remaining source-specific behavior | Original-source outcome reconciliation, cross-capture buyer closure/edit history, payout feasibility, broader full-document form segmentation, dated language conflicts and bounced-contact facts. Selected-step completion and private buyer negotiation have existing reviewed-input controls; native Turing/micro1 application controls are excluded from role evidence. No new competition score is required for current private negotiation. |
+| Independent recommendation quality | Freeze at least 100 independently labeled records with 20 actionable positives; measure at least 95% Primary precision, 90% positive retention, 80% displayed Verify usefulness, zero known critical leaks and complete material-claim support. Retain three independent complete frozen live-shadow captures without production notifications or database writes. |
 | Expanded source effectiveness | For each claimed source/route, report adequately covered bounded checks, unique actionable yield, duplicates, review effort and native costs; partial/failed retrieval remains missing coverage |
 | Live outcome integration | Review an authenticated outcome stream and channel mapping, then verify scoped transitions, uncertain receipt reconciliation and settlement evidence before enabling production use |
 | Interactive onboarding | A profile wizard that records supported operator facts rather than inventing qualifications |
