@@ -9,10 +9,12 @@ import asyncio
 import hashlib
 import json
 import ipaddress
+import math
 import re
 import socket
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
@@ -23,7 +25,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from ..models import Job
-from ..normalize import company_from_job_url, normalize
+from ..normalize import company_from_job_url, normalize, _parse_dt
 from .models import ListingObservation, SourceKind
 from .provenance import sanitize_payload, sanitize_url
 from .evidence_dimensions import public_page_kind, work_arrangement, project_observation
@@ -42,6 +44,8 @@ class RetrievalPolicy:
     cache_ttl_hours: float = 48.0
     retry_after_fallback_seconds: float = 60.0
     retry_after_safety_floor_seconds: float = 1.0
+    community_max_posts: int = 60
+    community_max_pages: int = 3
 
 
 @dataclass
@@ -54,6 +58,7 @@ class StageHealth:
     skipped: int = 0
     error_codes: dict[str, int] = field(default_factory=dict)
     remote_http_errors: int = 0
+    partial: int = 0
 
     def fail(self, code: str) -> None:
         self.failed += 1
@@ -189,6 +194,8 @@ class RetrievalBudget:
 async def _request(client: httpx.AsyncClient, budget: RetrievalBudget, url: str) -> httpx.Response:
     from ..bounded_transport import BoundedTransport
     from ..run_context import current_run
+    from ..public_http import require_public_transport
+    require_public_transport(client, url)
     if isinstance(client._transport, BoundedTransport):
         owner = client._transport.budget
         remaining = min(owner.remaining(), owner.limits.request_seconds)
@@ -417,28 +424,89 @@ def accepted_model_claim_count(observation_id: str, source_text: str, output: di
                str(claim.get("claim_span")).strip() in source_text)
 
 
+def _check_json_depth(value, *, max_depth=64) -> None:
+    pending = [(value, 0)]
+    while pending:
+        node, depth = pending.pop()
+        if depth > max_depth:
+            raise ValueError('json_depth_exceeded')
+        if isinstance(node, dict):
+            pending.extend((child, depth + 1) for child in node.values())
+        elif isinstance(node, list):
+            pending.extend((child, depth + 1) for child in node)
+
+
 def _jobposting_payload(body: str) -> dict | None:
     for match in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', body, re.I | re.S):
         try:
             raw = json.loads(unescape(match.group(1)))
-        except (ValueError, TypeError):
+            _check_json_depth(raw)
+        except (ValueError, TypeError, RecursionError):
             continue
         nodes = raw if isinstance(raw, list) else raw.get("@graph", [raw]) if isinstance(raw, dict) else []
+        if isinstance(nodes, dict):
+            nodes = [nodes]
+        if not isinstance(nodes, list):
+            continue
         for node in nodes:
             kinds = node.get("@type", []) if isinstance(node, dict) else []
             if isinstance(kinds, str): kinds = [kinds]
+            if not isinstance(kinds, list) or not all(isinstance(kind, str) for kind in kinds):
+                continue
             if "JobPosting" in kinds:
                 return node
     return None
 
 
+def _posting_location(value: object) -> str:
+    if isinstance(value, list):
+        return ', '.join(filter(None, (_posting_location(item) for item in value)))
+    if isinstance(value, dict):
+        address = value.get('address')
+        if address is not None:
+            return _posting_location(address)
+        parts = [value.get(k) for k in ('addressLocality', 'addressRegion', 'addressCountry') if value.get(k)]
+        return ', '.join(_posting_location(part) for part in parts) if parts else str(value.get('name') or '')
+    return str(value or '')
+
+
+def _posting_salary(payload: dict) -> str | None:
+    """Preserve native amounts and units without inventing currency or hours."""
+    salary = payload.get('baseSalary')
+    if not isinstance(salary, dict):
+        return None
+    currency = salary.get('currency') or payload.get('salaryCurrency')
+    if not isinstance(currency, str) or not re.fullmatch(r'[A-Za-z]{3}', currency):
+        return None
+    value = salary.get('value')
+    quantity = value if isinstance(value, dict) else {'value': value}
+    def amount(value):
+        return format(Decimal(str(value)), 'f') if type(value) in {float, int} and math.isfinite(value) and value >= 0 else None
+    low = amount(quantity.get('minValue'))
+    high = amount(quantity.get('maxValue'))
+    single = amount(quantity.get('value'))
+    if low and high:
+        if float(low) > float(high):
+            return None
+        literal = f'{low} - {high}'
+    elif single:
+        literal = single
+    elif low:
+        literal = f'at least {low}'
+    elif high:
+        literal = f'up to {high}'
+    else:
+        return None
+    unit = str(quantity.get('unitText') or '').strip()
+    unit = {'hour': 'hour', 'day': 'day', 'week': 'week', 'month': 'month', 'year': 'year'}.get(unit.casefold(), unit)
+    return f'{currency.upper()} {literal}' + (f' per {unit}' if unit else '')
+
+
 def _generic_job(payload: dict, public_url: str, body: str) -> Job | None:
     org = payload.get("hiringOrganization") or {}
-    location = payload.get("jobLocation") or payload.get("applicantLocationRequirements") or ""
-    if isinstance(location, list): location = ", ".join(str(x) for x in location)
-    if isinstance(location, dict):
-        address = location.get("address", location)
-        location = ", ".join(str(address.get(k) or "") for k in ("addressLocality", "addressRegion", "addressCountry") if address.get(k)) if isinstance(address, dict) else str(address)
+    remote_type = str(payload.get('jobLocationType') or '').casefold() == 'telecommute'
+    eligible = payload.get('applicantLocationRequirements')
+    location = _posting_location(eligible if remote_type and eligible else payload.get('jobLocation') or eligible)
     description = str(payload.get("description") or "")
     if not description:
         parser = _VisibleText(); parser.feed(body[:2_000_000]); description = " ".join(parser.parts)
@@ -448,7 +516,8 @@ def _generic_job(payload: dict, public_url: str, body: str) -> Job | None:
         return None
     job = Job(source="first_party", title=title, company=company or company_from_job_url(public_url),
                url=public_url, description=re.sub(r"<[^>]+>", " ", description),
-               location=str(location) or None, is_remote="remote" in (str(location) + description).casefold())
+               location=location or None, is_remote=remote_type or "remote" in (location + description).casefold(),
+               pay_raw=_posting_salary(payload), posted_at=_parse_dt(payload.get('datePosted')))
     arrangement = work_arrangement(job, payload)
     if arrangement.state == 'remote':
         job.is_remote = True
@@ -508,6 +577,13 @@ async def hydrate_public_posting(
     public = sanitize_url(url)
     parts = urlsplit(public)
     host = (parts.hostname or "").casefold()
+    from .community import HOSTS, hydrate_community_topic
+    from ..config import CONFIG
+    if host in HOSTS and CONFIG.v55.enabled:
+        try:
+            return await hydrate_community_topic(public, original, client=client, budget=budget)
+        except ValueError as exc:
+            return HydrationResult(state='unavailable', source='community_thread', public_url=public, error=str(exc))
     seg = [part for part in parts.path.split("/") if part]
     request_url = ""
     source = ""
@@ -536,6 +612,9 @@ async def hydrate_public_posting(
             except (KeyError, TypeError, ValueError):
                 cached = None
         if cached:
+            from ..bounded_transport import BoundedTransport
+            if isinstance(client._transport,BoundedTransport) and client._transport.budget.sources is not None:
+                client._transport.budget.sources.cached_inspection_if_scoped()
             response = httpx.Response(int(cached["status"]), content=str(cached["body"]).encode("utf-8"))
             final_url, trail = str(cached.get("final_url") or request_url), list(cached.get("trail") or [request_url])
         else:
@@ -544,6 +623,12 @@ async def hydrate_public_posting(
             if response.status_code not in {500, 502, 503, 504}:
                 break
             response = await _request(client, budget, request_url)
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+        if request_url in budget.cache:
+            budget.cache.pop(request_url)
+            budget.persist()
+        return HydrationResult(state='failed', source=source, request_url=request_url,
+                               public_url=public, error='invalid_cached_response')
     except (httpx.HTTPError, RuntimeError) as exc:
         return HydrationResult(state="deferred" if "budget" in str(exc) or "cooldown" in str(exc) else "failed", source=source, request_url=request_url, public_url=public, error=str(exc) or type(exc).__name__)
     if response.status_code == 429:
@@ -553,11 +638,30 @@ async def hydrate_public_posting(
         return HydrationResult(state="unavailable", source=source, request_url=request_url, public_url=public, error=f"http_{response.status_code}")
     if len(response.content) > budget.policy.max_body_bytes:
         return HydrationResult(state="partial", source=source, request_url=request_url, public_url=public, error="body_too_large")
-    if not cached:
-        budget.cache[request_url] = {"status": response.status_code, "body": response.text,
-                                     "final_url": final_url, "trail": trail,
-                                     "captured_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        outcome = _parse_posting_response(
+            response, source=source, public=public, request_url=request_url,
+            posting_id=posting_id, seg=seg, final_url=final_url,
+            original=original, cached_at=cached_at if cached else None, cached=bool(cached))
+    except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
+        outcome = HydrationResult(state='failed', source=source,
+                                  request_url=request_url, public_url=public,
+                                  error='invalid_hydration_content')
+    if outcome.state == 'complete' and outcome.job is not None:
+        if not cached:
+            budget.cache[request_url] = {'status': response.status_code, 'body': response.text,
+                                         'final_url': final_url, 'trail': trail,
+                                         'captured_at': datetime.now(timezone.utc).isoformat()}
+            budget.persist()
+    elif request_url in budget.cache:
+        # Old caches predate parser validation. Do not retain poisoned bodies.
+        budget.cache.pop(request_url)
         budget.persist()
+    return outcome
+
+
+def _parse_posting_response(response, *, source, public, request_url, posting_id,
+                            seg, final_url, original, cached_at, cached):
     if source == "first_party":
         # A redirect to a generic root/index is unavailable, never proof of closure.
         original_path, final_path = urlsplit(public).path.rstrip("/"), urlsplit(final_url).path.rstrip("/")
@@ -566,6 +670,14 @@ async def hydrate_public_posting(
                                    public_url=public, error="redirect_identity_boundary")
         if original_path and (not final_path or final_path in {"/jobs", "/careers"}):
             return HydrationResult(state="unavailable", source=source, request_url=request_url, public_url=public, error="redirect_to_index")
+        from ..config import CONFIG
+        if CONFIG.v55.enabled:
+            from .exact_roles import parse_native_role,role_route
+            if role_route(public) is not None and role_route(final_url)!=role_route(public):
+                return HydrationResult(state='unavailable',source=source,request_url=request_url,public_url=public,error='native_redirect_role_mismatch')
+            native=parse_native_role(response.text,public,original,
+                captured_at=cached_at if cached else datetime.now(timezone.utc),from_cache=bool(cached))
+            if native is not None:return native
         payload = _jobposting_payload(response.text)
         if payload is None:
             return HydrationResult(state="partial", source=source, request_url=request_url, public_url=public, error="jobposting_not_found")
@@ -591,7 +703,8 @@ async def hydrate_public_posting(
                                source_kind=public_page_kind(public))
     try:
         payload = response.json()
-    except ValueError:
+        _check_json_depth(payload)
+    except (ValueError, RecursionError):
         return HydrationResult(state="failed", source=source, request_url=request_url, public_url=public, error="invalid_json")
     if source == "ashby":
         jobs = payload.get("jobs") if isinstance(payload, dict) else None

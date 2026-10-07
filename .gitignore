@@ -15,6 +15,11 @@ keys/
 # Runtime/research data, replay captures, logs and archives
 data/
 runtime/
+state/
+profiles/
+reviews/
+backups/
+.jobhound-local.json
 roadmap/
 private/
 review/

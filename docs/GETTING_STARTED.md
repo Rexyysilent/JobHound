@@ -29,6 +29,11 @@ block external network connections. You do not need any API key to run them.
 
 ## 3. Configure your own copy
 
+For a keyless data-directory workflow with diagnostics and backup/restore, use
+[the local offline guide](local_alpha.md). Its optional demo persona is fictional;
+the public root profile remains qualification-free. The remaining instructions
+configure a separate live installation.
+
 ```powershell
 Copy-Item .env.example .env
 Copy-Item config.example.yaml config.yaml
@@ -98,7 +103,9 @@ experiments.
 
 ## What is not shipped yet
 
-There is no profile wizard, `doctor` command, hosted service or automatic
-mailbox/outcome sync. Some adapter defaults still assume India/INR. Community
-buyer-thread adapters (Make, n8n) and exact-role adapters (Turing, micro1) are
-planned but not built. See [the roadmap](ROADMAP.md).
+There is no interactive profile wizard, hosted service or automatic
+mailbox/outcome sync. `local doctor`, named local profiles and closed-state
+backup/restore are available. Some adapter defaults still assume India/INR.
+Native community and exact-role readers are included, but expanded daily source
+admission and independent recommendation quality remain separate work.
+See [the roadmap](ROADMAP.md).

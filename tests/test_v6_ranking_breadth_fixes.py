@@ -88,7 +88,7 @@ def test_required_years_above_profile_maximum_reject_in_v55(monkeypatch):
     _v55(monkeypatch)
     row = evaluate_raw(_sme("5+ years"), as_of=NOW).evaluated[0]
     assert row.decision.action_band.value == "reject"
-    assert "credentials:experience_mismatch:of:5_years" in row.assessment.blockers, row.assessment.blockers
+    assert "credentials:experience_mismatch:mathematics:5_years" in row.assessment.blockers, row.assessment.blockers
     assert not any(u.startswith("experience_unverified") for u in row.assessment.unresolved)
 
 

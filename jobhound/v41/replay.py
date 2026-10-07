@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -63,6 +64,7 @@ def write_snapshot(
         "profile_hash": result.metadata.profile_hash,
         "trust_registry_hash": result.metadata.trust_registry_hash,
         "config_hash": result.metadata.config_hash,
+        "runtime_versions": result.metadata.runtime_versions,
         "record_count": len(raw_records),
         "source_health": result.source_health,
         "hydration_observations": [
@@ -163,6 +165,8 @@ def replay(path: Path | str) -> RunResult:
     restore_release_policy(config, policy)
     prior = current_run()
     context = RunContext.capture(config=config, as_of=as_of,
+                                 profile=prior.profile() if prior else None,
+                                 registry=prior.registry() if prior else None,
                                  workspace=prior.workspace if prior else '.',
                                  run_id=prior.run_id if prior else None)
     with run_scope(context):
@@ -180,6 +184,7 @@ def replay(path: Path | str) -> RunResult:
         header.get("source_health") or []
     )
     result.metadata.snapshot_path = str(Path(path))
+    result.metadata.input_sha256 = hashlib.sha256(Path(path).read_bytes()).hexdigest()
     return result
 
 

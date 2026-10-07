@@ -100,9 +100,12 @@ CREATE TABLE IF NOT EXISTS canonical_id_aliases (
 class V41Store:
     def __init__(self, path: Path | str | None = None):
         from ..run_context import deny_review_side_effect
-        deny_review_side_effect('opportunity store access')
+        from ..local_paths import local_review_store_allowed
+        if not local_review_store_allowed(path):
+            deny_review_side_effect('opportunity store access')
         self._explicit_path = path is not None
         self.delivery = None
+        self._delivery_review = False
         configured = Path(path or CONFIG.v41.sidecar_db)
         self.path = configured if configured.is_absolute() else _ROOT / configured
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -502,6 +505,8 @@ class V41Store:
         delivery.import_legacy(evidence='legacy_channel_only_receipts')
         delivery.backfill_rollback_receipts()
         self.delivery = delivery
+        self._delivery_review = True
+        delivery._handoff_review_enabled = True
         return self.delivery
 
     def enable_delivery_production(self, *, workspace_id, profile_id, approved):
@@ -513,6 +518,7 @@ class V41Store:
         delivery.import_legacy(evidence='legacy_channel_only_receipts')
         delivery.backfill_rollback_receipts()
         self.delivery = delivery
+        self._delivery_review = False
         return delivery
 
     def _crosswalk_legacy_urls(self, result):
@@ -522,7 +528,9 @@ class V41Store:
             raise ValueError('delivery is not enabled')
 
         def key(value):
-            return public_url(value or '').rstrip('/').casefold()
+            # public_url normalizes the host; path and query identify postings
+            # and may be case sensitive. Never merge them by case folding.
+            return public_url(value or '')
 
         current = {}
         for item in result.evaluated:
@@ -582,20 +590,28 @@ class V41Store:
         return {'mapped': mapped, 'ambiguous': ambiguous}
 
     def record_delivery_run(self, result, destinations, *, now, card_cap=15,
-                            status_cap=5, adopt_legacy=False):
+                            status_cap=5, adopt_legacy=False, handoff_signal=False):
         """Persist the run, every revision, and selected delivery intents atomically."""
         from ..delivery_outbox import transaction, stage_delivery_run
         from ..review_audit import fingerprint, canonical_json
         if self.delivery is None:
             raise ValueError('delivery is not explicitly enabled')
+        if type(handoff_signal) is not bool or handoff_signal and not self._delivery_review:
+            raise ValueError('handoff signals require an explicitly enabled disposable review store')
+        if handoff_signal and adopt_legacy:
+            raise ValueError('handoff migration requires material evidence, not channel-only adoption')
         if not result.accounting_ok:
             raise ValueError('decision ledger failed')
         if result.metadata.engine_version != 'v5.0.0-rc1':
             raise ValueError('delivery requires the gated V5/V6 release policy')
         destinations = list(destinations)
-        request_hash = fingerprint({'run': result.model_dump(mode='json'),
+        request = {'run': result.model_dump(mode='json'),
                                     'destinations': [(d.channel, d.key) for d in destinations],
-                                    'card_cap': card_cap, 'status_cap': status_cap})
+                                    'card_cap': card_cap, 'status_cap': status_cap}
+        # Preserve existing idempotency receipts when the new mode is off.
+        if handoff_signal:
+            request['handoff_signal'] = 'jobhound-handoff-signal/v1'
+        request_hash = fingerprint(request)
         with transaction(self.conn):
             receipt = self.conn.execute(
                 'SELECT request_hash,report FROM delivery_runs WHERE workspace=? AND profile=? AND run_id=?',
@@ -612,6 +628,7 @@ class V41Store:
             report = stage_delivery_run(
                 self.delivery, result, destinations, now=now,
                 card_cap=card_cap, status_cap=status_cap,
+                handoff_signal=handoff_signal,
             )
             if adopt_legacy:
                 report['legacy_crosswalk'] = crosswalk

@@ -10,7 +10,7 @@ import re
 from urllib.parse import urlsplit
 
 from ..config import CONFIG
-from .models import Assessment, CanonicalJob, EligibilityStatus, SourceKind
+from .models import Assessment, CanonicalJob, EligibilityStatus, SourceKind, Evidence
 from .provenance import public_url
 
 
@@ -52,6 +52,9 @@ def captured_state(canonical: CanonicalJob) -> dict:
             else:
                 result[key] = value
         result['_outcome_legacy_conflicts'] = conflicts
+    # This key is generated only by the reviewed work policy, never an overlay.
+    result.pop('_reviewed_work_action', None)
+    result.pop('_reviewed_signal_order', None)
     return result
 
 
@@ -95,6 +98,33 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     ttl = CONFIG.v55.marketplace_ttl_hours if marketplace else CONFIG.v55.verification_ttl_hours
     open_fresh = assessment.verified_open_at is not None and (now - assessment.verified_open_at).total_seconds() <= ttl * 3600
     closed = any(o.vacancy_state == 'explicitly_closed' and o.identity_state in {'exact', 'corroborated'} for o in observations)
+    thread = None
+    if job.source == 'community_thread':
+        from .community import observation_thread
+        thread = next((t for o in observations if (t := observation_thread(o)) is not None and t.url == job.url), None)
+        if thread is None:
+            assessment.unresolved.append('thread_evidence_invalid')
+            assessment.blockers.insert(0, 'source_quality:thread_evidence_invalid')
+        else:
+            assessment.unresolved.extend(thread.issues + thread.caveats)
+            assessment.evidence.extend([
+                Evidence(dimension='thread', code='demand_original_at', value=thread.original_at.isoformat() if thread.original_at else None,
+                         source_field='community_thread.original_at', observation_id=canonical.best_observation.observation_id),
+                Evidence(dimension='thread', code='last_substantive_buyer_at', value=thread.last_substantive_buyer_at.isoformat() if thread.last_substantive_buyer_at else None,
+                         source_field='community_thread.last_substantive_buyer_at', observation_id=canonical.best_observation.observation_id),
+            ])
+            if thread.schema_version == 'community-thread/v2' and thread.intent == 'buyer':
+                assessment.evidence.append(Evidence(dimension='thread', code='buyer_terms_revision',
+                    value={'state': thread.terms_state, 'revision_id': thread.current_terms_revision_id,
+                           'post_ids': thread.current_terms_post_ids}, source_field='community_thread.revisions',
+                    observation_id=canonical.best_observation.observation_id))
+                if thread.terms_state in {'scope_changed', 'budget_changed', 'ambiguous', 'incomplete'}:
+                    assessment.unresolved.append('community_terms:' + thread.terms_state)
+                    _task(assessment, canonical, 'community_scope_revision',
+                          'Verify the current buyer scope, hosting/support responsibilities and budget in this exact thread; earlier amounts remain historical and do not establish agreed terms or paid work.', now)
+            if thread.thread_locked and thread.vacancy_state != 'explicitly_closed':
+                assessment.unresolved.append('community_reply_route_locked')
+                _task(assessment, canonical, 'community_contact_route', 'Verify the buyer contact route; a locked discussion does not prove the work is filled.', now)
     if closed:
         assessment.blockers.insert(0, 'source_quality:explicitly_closed')
         assessment.lifecycle, assessment.lifecycle_reason = 'closed', 'matching_source_explicitly_closed'
@@ -136,6 +166,13 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'assessment_already_completed'
         assessment.next_action = 'await_response'
     posted = timestamp(job.posted_at)
+    # Crawling a discussion, seller replies and cosmetic edits do not renew
+    # buyer demand. Keep the posting date as provenance; rank substantive
+    # activity by this same requester when native thread evidence exists.
+    if thread is not None and thread.intent == 'buyer':
+        buyer_activity = thread.last_substantive_buyer_at or thread.original_at
+        if buyer_activity is not None and buyer_activity <= now:
+            posted = buyer_activity
     age = max(0, (now - posted).total_seconds() / 86400) if posted else None
     # Some sources can never be checked automatically, so failed checks alone
     # do not hide a job: it moves to watch once the posting is older than the
@@ -155,6 +192,11 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'stale_unresolved_copy'
     elif thin_copy and age is None and attempts >= 1 and old_enough:
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'undated_copy_verification_exhausted'
+    if (thread is not None and thread.intent == 'buyer'
+            and age is not None and age > CONFIG.v55.community_buyer_activity_max_age_days
+            and assessment.lifecycle == 'active'):
+        assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'historical_buyer_request'
+        assessment.unresolved.append('historical_buyer_request')
     if age is not None:
         half_life = CONFIG.ranking.easy_entry_half_life_days if assessment.easy_entry else CONFIG.ranking.freshness_half_life_days
         assessment.freshness = 2 ** (-age / half_life)
@@ -192,8 +234,8 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     assessment.action_cost_known = cash is not None
     assessment.action_cost_acceptable = cash == 0 or (cash is None and not marketplace and not high_effort)
     if cash is not None and cash > 0:
-        assessment.action_cost_acceptable = bool(cost.get('operator_approved'))
-    if marketplace and not (cost.get('scope_verified') and cash is not None and cost.get('competition_checked')):
+        assessment.action_cost_acceptable = cost.get('operator_approved') is True
+    if marketplace and not (cost.get('scope_verified') is True and cash is not None and cost.get('competition_checked') is True):
         assessment.action_cost_acceptable = False
         _task(assessment, canonical, 'bid_cost_scope_competition', 'Verify the individual buyer, deliverables, budget, Connects cost and competing proposals before spending on a bid.', now)
     elif not assessment.action_cost_acceptable:
@@ -246,9 +288,29 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
         assessment.action_readiness = 'verification_needed'
         assessment.next_action = 'verify'
         assessment.next_step = assessment.verification_tasks[0]['next_step'] if assessment.verification_tasks else 'Wait for a material opening, account-state change or a scheduled recheck.'
+    if thread is not None and 'paid_intent_unconfirmed' in thread.caveats and assessment.next_action in {'apply', 'verify'}:
+        _task(assessment, canonical, 'community_paid_scope',
+              'Confirm whether this exact requester wants paid contractor help, and clarify the deliverables and buyer budget; a forum help request does not establish paid work.', now)
+        assessment.action_readiness = 'verification_needed'
+        assessment.next_action = 'verify'
+        assessment.verification_tasks.sort(key=lambda task: 0 if task['missing_fact'].startswith('location_scope_conflict:') else 1 if task['missing_fact']=='community_paid_scope' else 2)
+        assessment.next_step = assessment.verification_tasks[0]['next_step']
+    if thread is not None and thread.schema_version == 'community-thread/v2' and thread.terms_state in {
+        'scope_changed', 'budget_changed', 'ambiguous', 'incomplete'
+    } and assessment.next_action in {'apply', 'verify'}:
+        assessment.action_readiness, assessment.next_action = 'verification_needed', 'verify'
+        assessment.verification_tasks.sort(key=lambda task: 0 if task['missing_fact'].startswith('location_scope_conflict:')
+            else 1 if task['missing_fact']=='community_paid_scope'
+            else 2 if task['missing_fact']=='community_scope_revision' else 3)
+        if assessment.verification_tasks:
+            assessment.next_step = assessment.verification_tasks[0]['next_step']
     if assessment.lifecycle != 'active':
         assessment.action_readiness = 'watch'
-        if assessment.lifecycle_reason in {'application_already_submitted', 'assessment_already_completed'}:
+        if assessment.lifecycle_reason == 'historical_buyer_request':
+            assessment.next_action = 'await_change'
+            assessment.next_step = ('High-fit historical lead: wait for substantive new buyer activity '
+                                    'before treating this request as a current daily action.')
+        elif assessment.lifecycle_reason in {'application_already_submitted', 'assessment_already_completed'}:
             assessment.next_action = 'await_response'
             assessment.next_step = 'Wait for the recorded application or assessment outcome; do not repeat completed steps.'
         elif not assessment.verification_tasks:
@@ -267,10 +329,41 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
         assessment.time_to_cash_days = float(timing)
     if canonical.outcome_projection is not None:
         apply_reviewed_outcome_action(canonical, assessment, now)
-    if assessment.blockers:
-        assessment.eligibility = EligibilityStatus.FAILED
-        assessment.next_action = 'skip'
-        assessment.next_step = 'Do not apply based on this record: ' + '; '.join(assessment.blockers[:3])
+    if canonical.outcome_binding_hold:
+        _task(assessment, canonical, 'active_outcome_attempt',
+              'Select exactly one active application attempt for this exact role; retain the other attempts as history before choosing the next action.', now)
+        assessment.unresolved.append('outcome_binding:' + canonical.outcome_binding_hold)
+        assessment.action_readiness = 'verification_needed'
+        assessment.next_action = 'verify'
+        assessment.next_step = next(t['next_step'] for t in assessment.verification_tasks if t['missing_fact']=='active_outcome_attempt')
+    from .work_actions import existing_work_action_allowed
+    if closed and assessment.lifecycle != 'closed' and not existing_work_action_allowed(canonical, assessment):
+        # A freshness/watch rule cannot reopen the same public request. Scoped
+        # application/account facts remain recorded separately in account_state.
+        assessment.lifecycle, assessment.lifecycle_reason = 'closed', 'matching_source_explicitly_closed'
+        assessment.action_readiness = 'watch'
+        assessment.verification_tasks = []
+    from .action_constraints import apply_action_constraints
+    apply_action_constraints(canonical,assessment,now,thread=thread)
+    finalize_rejected_action(assessment, canonical)
+    from .work_actions import finalize_work_action_view
+    finalize_work_action_view(assessment)
+
+
+def finalize_rejected_action(assessment: Assessment, canonical: CanonicalJob | None = None) -> None:
+    """A public policy veto removes action authority while retaining evidence."""
+    if not assessment.blockers:
+        return
+    from .work_actions import existing_work_action_allowed
+    if existing_work_action_allowed(canonical, assessment):
+        # Reading an existing payment record leaves public qualification failed.
+        if assessment.account_state['_reviewed_work_action']['read_only']:
+            assessment.eligibility = EligibilityStatus.FAILED
+        return
+    assessment.eligibility = EligibilityStatus.FAILED
+    assessment.action_readiness = 'closed' if assessment.lifecycle == 'closed' else 'blocked'
+    assessment.next_action = 'skip'
+    assessment.next_step = 'Do not apply based on this record: ' + '; '.join(assessment.blockers[:3])
 
 
 def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessment,
@@ -280,12 +373,15 @@ def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessmen
     Explicit projected state may refine an action but never silently override a
     conflicting legacy overlay or a suitability blocker. Delivery is separate.
     """
-    from .outcomes import ActionChecks
+    from .outcomes import ActionChecks, AssessmentIdentity
     from ..config import CONFIG
     projection = canonical.outcome_projection
     if projection is None or not projection.events:
         return
-    conflicts = sorted(set(projection.conflicts +
+    from .work_actions import apply_reviewed_work_action
+    if apply_reviewed_work_action(canonical, assessment, now):
+        return
+    conflicts = sorted(set(projection.action_conflicts() +
         assessment.account_state.get('_outcome_legacy_conflicts', [])))
     if conflicts:
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'outcome_conflict'
@@ -296,6 +392,15 @@ def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessmen
                   'Review the dated facts for this exact application; do not repeat or reverse a step yet.', now)
         return
     value = projection.value
+    selected_step = value('assessment_step')
+    step = selected_step if isinstance(selected_step, AssessmentIdentity) else None
+    has_scoped_assessment = any(e.assessment is not None for e in projection.events)
+
+    def step_value(predicate):
+        if step is None and has_scoped_assessment:
+            return None
+        return projection.value(predicate, assessment=step)
+
     if value('application_state') in {'rejected', 'withdrawn'}:
         assessment.lifecycle, assessment.lifecycle_reason = 'closed', 'exact_application_closed'
         assessment.action_readiness, assessment.next_action = 'watch', 'await_change'
@@ -307,10 +412,11 @@ def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessmen
         assessment.action_readiness, assessment.next_action = 'watch', 'verify'
         assessment.next_step = 'Wait for exact project-access restoration or resolve this recorded access blocker; do not repeat onboarding.'
         return
-    if value('assessment_state') in {'completed', 'passed'}:
+    if step_value('assessment_state') in {'completed', 'passed'}:
         assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'assessment_already_completed'
         assessment.action_readiness, assessment.next_action = 'watch', 'await_response'
-        assessment.next_step = 'The existing assessment is complete; wait for its outcome or allocation, not another test.'
+        assessment.next_step = ('The existing assessment is complete; wait for its outcome or allocation, not another test.'
+            if step is None else f'Assessment {step.step_id}, revision {step.revision}, is complete; wait for its outcome or allocation, not another test.')
         assessment.verification_tasks = []
         return
     if assessment.blockers or assessment.account_state.get('applicable_block'):
@@ -318,8 +424,21 @@ def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessmen
     if assessment.lifecycle_reason == 'known_account_block':
         return
 
-    def current(predicate):
-        facts = projection.facts(predicate)
+    if step is None and has_scoped_assessment:
+        assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'assessment_step_not_selected'
+        assessment.action_readiness, assessment.next_action = 'verification_needed', 'verify'
+        assessment.next_step = 'Confirm the provider-selected assessment step and terms revision for this exact application before using any route or prior approval.'
+        _task(assessment, canonical, 'current_assessment_step', assessment.next_step, now)
+        return
+    if step is not None and step_value('assessment_state') is None:
+        assessment.lifecycle, assessment.lifecycle_reason = 'active', 'assessment_step_state_unknown'
+        assessment.action_readiness, assessment.next_action = 'verification_needed', 'verify'
+        assessment.next_step = f'Confirm the invitation or completion state for assessment {step.step_id}, revision {step.revision}; another step does not establish it.'
+        _task(assessment, canonical, 'assessment_step_state', assessment.next_step, now)
+        return
+
+    def current(predicate, *, assessment_step=None):
+        facts = projection.facts(predicate, assessment=assessment_step)
         return bool(facts) and any(
             fact.source_kind != 'reviewed_seed' and fact.event_at is not None
             and fact.event_at <= now
@@ -345,12 +464,14 @@ def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessmen
         assessment.verification_tasks = [t for t in assessment.verification_tasks if
             t['missing_fact'] not in {'current_open_status', 'application_route'}]
         return
-    if value('assessment_state') == 'invited':
-        checks = value('action_checks')
+    if step_value('assessment_state') == 'invited':
+        checks = step_value('action_checks')
         ready_checks = isinstance(checks, ActionChecks) and all(
             getattr(checks, k) is True for k in ('privacy', 'schedule', 'equipment', 'cost'))
-        route = value('assessment_route')
-        fresh = all(current(k) for k in ('assessment_state', 'action_checks', 'assessment_route'))
+        route = step_value('assessment_route')
+        fresh = all(current(k, assessment_step=step) for k in ('assessment_state', 'action_checks', 'assessment_route'))
+        if step is not None:
+            fresh = fresh and current('assessment_step')
         assessment.lifecycle, assessment.lifecycle_reason = 'active', 'existing_assessment_invitation'
         remaining = [t for t in assessment.verification_tasks if
                      t['missing_fact'] not in {'current_open_status', 'application_route'}]
@@ -360,11 +481,13 @@ def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessmen
                 'Confirm the exact assessment requirements against documented eligibility before starting it.')
         elif not ready_checks or not route or not fresh:
             assessment.action_readiness, assessment.next_action = 'verification_needed', 'verify'
-            assessment.next_step = 'Confirm current assessment access and explicit privacy, schedule, equipment and cost compatibility before taking the existing test.'
+            assessment.next_step = ('Confirm current assessment access and explicit privacy, schedule, equipment and cost compatibility before taking the existing test.'
+                if step is None else f'Confirm current access and explicit privacy, schedule, equipment and cost compatibility for assessment {step.step_id}, revision {step.revision}; approvals for another step or revision do not apply.')
             _task(assessment, canonical, 'assessment_prerequisites', assessment.next_step, now)
         else:
             assessment.action_readiness, assessment.next_action = 'captured_next_step', 'complete_known_step'
-            assessment.next_step = f'Complete the existing compatible assessment through {route}; invitation is not selection or paid allocation.'
+            assessment.next_step = (f'Complete the existing compatible assessment through {route}; invitation is not selection or paid allocation.'
+                if step is None else f'Complete assessment {step.step_id}, revision {step.revision}, through {route}; this invitation is not selection or paid allocation.')
             assessment.verification_tasks = [t for t in assessment.verification_tasks if
                 t['missing_fact'] not in {'current_open_status', 'application_route'}]
         return

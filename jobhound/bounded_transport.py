@@ -43,12 +43,18 @@ class RequestLimits:
 
 
 class RunBudget:
-    def __init__(self, context, limits, *, wall=time.time, monotonic=time.monotonic):
+    def __init__(self, context, limits, *, wall=time.time, monotonic=time.monotonic, source_plan=None):
         self.context, self.limits = context, limits
         self.wall, self.monotonic = wall, monotonic
         self.started = monotonic()
         self.gate = asyncio.Semaphore(limits.concurrency)
         self.host_gates = {}
+        self.sources = None
+        if source_plan is not None:
+            from .source_budget import SourceBudget
+            self.sources = SourceBudget(self, source_plan)
+            if self.sources.plan.request_ceiling > limits.requests:
+                raise ValueError('source plan cannot add to shared request ceiling')
         root = Path(context.workspace)
         if any(p.casefold() in {'data', 'state'} for p in root.parts) or (root/'run.py').exists():
             raise ValueError('request state requires a dedicated review workspace')
@@ -63,8 +69,12 @@ class RunBudget:
                     scope TEXT, state TEXT, code TEXT);
             ''')
             signature = context.fingerprint() + repr(limits)
+            if self.sources is not None:
+                self.sources.initialize(db)
+                signature += self.sources.plan_json
             db.execute('INSERT OR IGNORE INTO runs VALUES(?,?,0,?,?)',
-                       (context.run_id, signature, wall()+limits.seconds, limits.requests))
+                       (context.run_id, signature, wall()+limits.seconds,
+                        min(limits.requests,self.sources.plan.request_ceiling) if self.sources else limits.requests))
             row = db.execute('SELECT fingerprint, deadline FROM runs WHERE id=?', (context.run_id,)).fetchone()
             if row[0] != signature:
                 raise ValueError('run identity reused with different inputs or limits')
@@ -103,9 +113,12 @@ class RunBudget:
             row = db.execute('SELECT used, cap FROM runs WHERE id=?', (self.context.run_id,)).fetchone()
             if row[0] >= row[1]:
                 raise RequestDeferred('request_budget_exhausted', request=request)
+            checked = self.sources.check_http(db,request) if self.sources else None
             db.execute('UPDATE runs SET used=used+1 WHERE id=?', (self.context.run_id,))
-            return db.execute('INSERT INTO attempts(run_id,scope,state) VALUES(?,?,?)',
-                              (self.context.run_id, host, 'reserved_unknown')).lastrowid
+            attempt=db.execute('INSERT INTO attempts(run_id,scope,state) VALUES(?,?,?)',
+                               (self.context.run_id, host, 'reserved_unknown')).lastrowid
+            if self.sources:self.sources.sent(db,attempt,checked)
+            return attempt
 
     def finish(self, attempt, state, code=None):
         with self.connect() as db:
@@ -140,7 +153,12 @@ class RunBudget:
             used = db.execute('SELECT used FROM runs WHERE id=?', (self.context.run_id,)).fetchone()[0]
             states = dict(db.execute('SELECT state,count(*) FROM attempts WHERE run_id=? GROUP BY state',
                                      (self.context.run_id,)))
-        return {'requests_reserved': used, 'limit': self.limits.requests, 'attempt_states': states}
+            source_receipt=self.sources.receipt(db,used) if self.sources else None
+        receipt={'requests_reserved': used,
+                 'limit': min(self.limits.requests,self.sources.plan.request_ceiling) if self.sources else self.limits.requests,
+                 'attempt_states': states}
+        if source_receipt is not None:receipt['source_budget']=source_receipt
+        return receipt
 
 
 class BoundedTransport(httpx.AsyncBaseTransport):
@@ -251,7 +269,9 @@ class LimitedStream(httpx.AsyncByteStream):
             try:
                 await self.inner.aclose()
             finally:
-                if not self.finished:
-                    self.budget.finish(self.attempt, 'interrupted', 'body_not_completed')
-                self.host_gate.release()
-                self.budget.gate.release()
+                try:
+                    if not self.finished:
+                        self.budget.finish(self.attempt, 'interrupted', 'body_not_completed')
+                finally:
+                    self.host_gate.release()
+                    self.budget.gate.release()

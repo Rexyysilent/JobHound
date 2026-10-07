@@ -6,7 +6,7 @@ better recommendation.
 
 ## Development
 
-Use Python 3.11 or newer in a virtual environment. Install `requirements.txt`,
+Use Python 3.12 or newer in a virtual environment. Install `requirements.txt`,
 then run `python -m pytest -q`. Tests use synthetic configuration and block
 external network connections. CI runs the suite on Linux and Windows.
 

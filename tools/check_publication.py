@@ -35,8 +35,8 @@ RULES = {
 }
 SAFE_DOMAINS = {"example.com", "example.org", "example.net", "example.invalid", "localhost"}
 GENERATED = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
-PRIVATE_ROOTS = {"data", "roadmap", "private", "review", "keys"}
-PRIVATE_FILES = {".env", "config.yaml", "profile.yaml", "platform_registry.yaml", "platforms_to_join.yaml"}
+PRIVATE_ROOTS = {"data", "runtime", "state", "profiles", "reviews", "backups", "roadmap", "private", "review", "keys"}
+PRIVATE_FILES = {".env", "config.yaml", "profile.yaml", "platform_registry.yaml", "platforms_to_join.yaml", ".jobhound-local.json"}
 FORBIDDEN_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".log", ".pem", ".key", ".p12", ".pfx", ".zip", ".ipynb", ".pyc"}
 
 

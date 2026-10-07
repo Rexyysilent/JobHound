@@ -47,3 +47,10 @@ credential previously shared in logs/screenshots remains a separate account acti
 Local `.env` and personal YAML files may be changed by normal use but must stay
 ignored. Review generated outputs before sharing: a URL or email body can carry
 identifiers even when routine HTTP logging is redacted.
+
+The local workspace adds profile directories, review state, manifests and
+backups; those are private too. The checker rejects their root paths in both
+folder and index mode. `examples/local/` contains explicitly fictional demo
+policies, separate from the qualification-free root starter. They are not an
+operator account/profile snapshot and must not be used as evidence of real
+qualifications.

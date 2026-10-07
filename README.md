@@ -29,6 +29,9 @@ APPLY | AI Training Contributor - Bengali (India) - Remote | Example Co
 Cards say what was actually verified and what is still unknown. Unknown pay
 stays "unknown"; an advertised rate is never shown as earnings.
 
+The ordering line now labels task fit and role priority separately. They are
+different ranking fields, not a fraction or a score out of a maximum.
+
 ## How it works
 
 ```text
@@ -61,8 +64,8 @@ changes how a run talks to the internet:
 - **One budget per run.** Every request in an approved V5.5 run (discovery,
   pagination, redirects and page re-checks) goes through a single bounded
   transport. It has a request cap, time limits and per-response size limits
-  (`v55.production_fetch`). A full run makes about 55–80 discovery requests;
-  the default cap is 200.
+  (`v55.production_fetch`). The example policy sets a 200-request ceiling;
+  that is a budget, not a promise of complete coverage.
 - **Partial results survive.** If one Greenhouse/Lever/Ashby board times out,
   the healthy boards' jobs are kept. If a JSearch or Serper query fails
   halfway, earlier queries' results are kept. Records without IDs and changed
@@ -80,6 +83,29 @@ changes how a run talks to the internet:
 - **Polite by construction.** Credentialed requests don't follow redirects,
   `Retry-After` and cooldowns are respected, and there is no CAPTCHA, proxy or
   login bypass. Upwork is never scraped directly.
+
+Native Make/n8n thread readers and exact public Turing/micro1 role readers are
+included. Threads separate the buyer from sellers, quotes and unrelated
+replies; exact-role readers distinguish a real role from a JavaScript shell.
+These are bounded evidence readers, not a claim of complete platform coverage.
+The optional [source policy](docs/source_policy.md) records admission, cadence,
+inspection cost and adequately covered checks before expanding a source.
+
+### Quality gates: a useful title is not enough
+
+- Resource pages and job roundups fail the specific-vacancy gate, even when
+  their text mentions hiring or pay. The same floor applies to full cards and
+  the compact **Also eligible** list.
+- Unresolved hosted-board copies under `is-great.org` and `my-board.org` cannot
+  headline as original jobs. An identity-resolved employer or ATS URL remains
+  usable even when a copy appeared elsewhere.
+- Buyer requests with native thread evidence become historical leads after
+  60 days without substantive activity by that buyer. Seller replies, cosmetic
+  edits and simple acknowledgments do not refresh demand. Historical leads
+  remain in Watch/audit records and leave the daily card and compact pools.
+- Company revenue, funding, customer contract values and allowances do not
+  become worker wages. Cash benefits retain their conditions separately from
+  base pay; unsupported units stay unknown.
 
 ### v5.7 outcomes: remember what actually happened
 
@@ -99,6 +125,18 @@ applications, assessments, rejections, buyer replies and access changes.
 Right now outcome import is an **offline preview** (`review outcomes`) using
 reviewed files. It never reads a mailbox or writes to production stores.
 
+Review now keeps historical application attempts, assessment revisions and
+work allocations separately. One active attempt supplies the next action;
+approvals for another assessment revision or allocation do not carry over.
+Agreed terms, delivered work, acceptance, invoice, settlement and received
+payment remain different facts. Public suitability blockers still veto an
+application or work action.
+
+Optional [handoff signals](docs/handoff_signals.md) prepare a compact preview
+from a marked disposable outbox. They share the existing ranking and delivery
+machinery, preserve destination-specific receipts, and require explicit review
+to replace a mixed unsent draft. A preview is not a provider receipt.
+
 ### Durable delivery: no silent duplicates, no silent losses
 
 - Each decision revision and its delivery intent are committed together before
@@ -112,9 +150,15 @@ reviewed files. It never reads a mailbox or writes to production stores.
   appeared or cleared. A job seen again with nothing changed stays quiet.
 - Rolling back to V4.2 is safe: it sees what V5.5 already delivered.
 
+Public-page connections pin a validated public IP while retaining the original
+hostname for HTTP and TLS verification. Unsupported proxies fail closed, SMTP
+and IMAP verify certificates, and unrelated JobPosting blocks cannot make a
+parent listing appear verified. These fixes have offline regression tests;
+they are not a certification of every security property.
+
 ## Try it
 
-Python 3.11+. The quickest look needs no install: open `workbench/index.html`
+Python 3.12+. The quickest look needs no install: open `workbench/index.html`
 and click **Load synthetic demo**. To run the code:
 
 ```powershell
@@ -123,10 +167,24 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-Tests run without credentials, using synthetic profiles and listings. For live
+Tests run without credentials, using synthetic profiles and listings. A pinned
+Python 3.12 dependency set is also supplied in `requirements-local.lock`. For live
 use, follow [Getting started](docs/GETTING_STARTED.md): copy the example
 configs, pick sources, try `review capture`, then schedule daily runs. Sources,
 LLM calls and delivery are all off in the starter config.
+
+### Local offline workflow
+
+`python run.py local --help` provides isolated data directories, named profiles,
+diagnostics, reviewed-file replay/outcomes, a fictional workflow demo and
+closed-state backup/restore. Local commands do not read the repository's
+operator settings or provider credentials and do not enable collection or
+delivery.
+
+Initialization uses the qualification-free public starter. For a positive
+fictional demo, explicitly select the separate policies in `examples/local/`;
+they are test personas, not declarations about you. Follow
+[the local setup guide](docs/local_alpha.md) for the exact commands.
 
 ## Good to know
 
@@ -144,6 +202,7 @@ LLM calls and delivery are all off in the starter config.
 
 This repo contains the code, synthetic tests and demo inputs, not my private
 configuration, job history, outcomes or credentials. See
+[the current change summary](docs/CHANGES.md),
 [release checks](RELEASE_CHECKS.md) for what has been verified and
 [publication notes](PUBLICATION.md) for the
 sharing boundary. Plans and known gaps are in the [roadmap](docs/ROADMAP.md);

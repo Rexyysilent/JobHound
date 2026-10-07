@@ -10,6 +10,7 @@ import httpx
 
 from ..config import CONFIG
 from .base import Source
+from .query_batch import fetch_queries
 
 _API = "https://remotive.com/api/remote-jobs"
 
@@ -22,15 +23,12 @@ class RemotiveSource(Source):
         return CONFIG.sources.remotive.enabled
 
     async def _fetch(self, client: httpx.AsyncClient) -> list[dict]:
-        seen_ids: set = set()
-        out: list[dict] = []
-        for term in CONFIG.sources.remotive.searches:
-            resp = await client.get(_API, params={"search": term})
-            resp.raise_for_status()
-            for job in resp.json().get("jobs", []):
-                jid = job.get("id")
-                if jid in seen_ids:
-                    continue
-                seen_ids.add(jid)
-                out.append(job)
-        return out
+        def rows(payload):
+            if not isinstance(payload, dict) or 'jobs' not in payload:
+                raise ValueError('missing_jobs')
+            return payload['jobs']
+        return await fetch_queries(
+            self, client, CONFIG.sources.remotive.searches, method='GET', url=_API, headers={},
+            request_args=lambda term: {'params': {'search': term}},
+            rows_from_payload=rows, valid_row=lambda row: isinstance(row, dict),
+        )

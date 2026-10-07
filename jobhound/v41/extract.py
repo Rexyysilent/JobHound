@@ -12,7 +12,7 @@ from ..filters.eligibility import Profile
 from ..filters.matching import phrase_in_text
 from ..text import normalize_match, fold_dashes
 from .models import CanonicalJob, PayCandidate, SourceKind
-from .compensation import parse_compensation
+from .compensation import parse_compensation, money_expression_spans
 from .compensation_legacy import parse_compensation as parse_compensation_legacy
 
 _HEADING_CATEGORIES = {
@@ -212,12 +212,24 @@ class ExtractedSections:
         return chosen or self.other
 
 
-def extract_sections(description: str) -> ExtractedSections:
+def extract_sections(description: str, *, native_source: str | None = None) -> ExtractedSections:
     """Best-effort section routing that keeps boilerplate out of fit evidence."""
     text = description or ""
     # Curly and ASCII apostrophes have equal length, so offsets remain valid.
     scan_text = text.replace("’", "'")
-    matches = list(_HEADING.finditer(scan_text))
+    lookup=_HEADING_LOOKUP
+    pattern=_HEADING
+    aliases={
+        'turing_role': {'key qualifications':'requirements','education & experience':'requirements',
+            'description':'responsibilities','offer details':'ignore','evaluation process':'ignore'},
+        'micro1_role': {'scope of work':'responsibilities','required skills':'requirements',
+            'preferred qualifications':'other','role title':'ignore','role type':'ignore','location':'ignore'},
+    }.get(native_source)
+    if aliases:
+        lookup=_HEADING_LOOKUP|aliases
+        names='|'.join(re.escape(h).replace(r'\ ',r'\s+') for h in sorted(lookup,key=len,reverse=True))
+        pattern=re.compile(rf'(?im)(?:^|(?<=[\n.!?]))[ \t]*(?P<heading>{names})(?=[ \t]*(?:[:.\-–—]|\n|$)|[ \t]+\S)')
+    matches = list(pattern.finditer(scan_text))
     if not matches:
         return ExtractedSections(other=text[:3500])
 
@@ -225,7 +237,7 @@ def extract_sections(description: str) -> ExtractedSections:
     requirements_found = False
     for index, match in enumerate(matches):
         heading = re.sub(r"\s+", " ", match.group("heading").casefold()).strip()
-        category = _HEADING_LOOKUP[heading]
+        category = lookup[heading]
         start = match.end()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         content = text[start:end].strip(" :.-\n\t–—")
@@ -237,6 +249,8 @@ def extract_sections(description: str) -> ExtractedSections:
         elif category == "requirements":
             requirements_found = True
             result.requirements += " " + content
+        elif category == "other":
+            result.other += " " + content
     result.role = result.role.strip()[:3000]
     result.responsibilities = result.responsibilities.strip()[:4000]
     result.requirements = result.requirements.strip()[:4000]
@@ -268,12 +282,15 @@ def _candidate(
     source_kind: SourceKind,
     *,
     guaranteed: bool = False,
+    list_item: bool = False,
 ) -> PayCandidate | None:
     # Search snippets sometimes render the range dash as either ``.-.`` or
     # ``. -.``.  Repair only the parsing copy; PayCandidate.raw remains the
     # exact captured evidence.
     semantic_raw = re.sub(r"\s*\.\s*-\s*\.\s*", " - ", raw)
     semantic_raw = re.sub(r"\.\s*(Hourly|/\s*(?:hr|hour)|per\s+hour)\b", r" \1", semantic_raw, flags=re.I)
+    if list_item:
+        semantic_raw=re.sub(r'^-\s+','',semantic_raw)
     if CONFIG.v55.enabled:
         claim = parse_compensation(semantic_raw)
         if "no_supported_money_expression" in claim.warnings:
@@ -383,8 +400,9 @@ def _fixed_candidate(
 def _claim_credibility(candidate: PayCandidate) -> float:
     """Score the claim's own observation and field; never borrow URL trust."""
     if CONFIG.v55.enabled and (candidate.actual_unit == "unknown" or candidate.scope in {
-        "non_opportunity_document", "other_assignment", "non_pay_context",
-    }):
+        "non_opportunity_document", "other_assignment", "non_pay_context", "unattributed_thread_copy",
+        "historical_thread_terms", "unresolved_thread_terms", "role_benefit_unverified", "unattributed_amount",
+    } or candidate.scope.startswith('community_benefit:')):
         return 0.0
     source_kind = candidate.observation_source_kind or SourceKind.UNKNOWN
     if source_kind == SourceKind.CONTENT_FARM:
@@ -422,6 +440,166 @@ def _claim_credibility(candidate: PayCandidate) -> float:
     return round(max(0.0, min(1.0, candidate.confidence * provenance)), 3)
 
 
+_BUSINESS_AMOUNT_LEFT = re.compile(
+    r"\b(?:revenues?|turnover|valuation|profits?|average\s+deal\s+size|"
+    r"funding|financing|growth\s+investment|loans\s+funded|assets\s+under\s+management|deal\s+cycles?|ACV)"
+    r"\s*(?:(?:of|at|is|was|were|are|now|currently|already|exceeding|exceeds|reached|total(?:s|ling|ing)?|"
+    r"over|about|approximately|more\s+than|less\s+than|from|in|the|range|[:=])\s*)*$", re.I,
+)
+_BUSINESS_AMOUNT_RIGHT = re.compile(
+    r"^\s*(?:billion\b|trillion\b|[bB]\b)?\s*\+?\s*(?:(?:million|billion|trillion|[mMbB])\b\s*)?"
+    r"(?:(?:USD|INR|EUR|GBP|CAD|AUD)\s+)?"
+    r"(?:(?:in|of)\s+)?(?:(?:annual|yearly|lifetime|monthly|recurring|active|project|global|cumulative)\s+)*"
+    r"(?:revenues?(?!\s+shar(?:e|ing))|profits?(?!\s+shar(?:e|ing))|turnover|funding|financing|growth\s+investment|"
+    r"loans\s+funded|assets\s+under\s+management|"
+    r"valuation|market|industry|ARR|ACV|AUM|ad\s+spend|advertising\s+spend|merchandise|"
+    r"(?:customer|ecosystem)\s+value|assets\b|capital|credit\b|digital\s+asset\s+transfers|raised|series\s+[A-Z](?:\s+funding)?)\b", re.I,
+)
+_RAISED_AMOUNT_LEFT = re.compile(
+    r"\braised\s*(?:(?:a|an|total\s+of|over|more\s+than|about|approximately)\s+)*[~≈]?\s*$", re.I,
+)
+_OWN_WAGE_LEFT = re.compile(
+    r"\b(?:salary|salaire|rémunération|compensation|pay(?:\s+rate)?|wages?|hourly\s+rate|"
+    r"(?:project\s+)?budget|project\s+funding|commission|stipend|bonus)\s*"
+    r"(?:(?:annuels?|annuelles?|mensuels?|mensuelles?|horaires?|bruts?|nettes?|range|is|of|at|from|between|raised|to|up\s+to|over|more\s+than|[:=])\s*)*$", re.I,
+)
+_PERK_AMOUNT_LEFT = re.compile(
+    r"\b(?:fertility\s+support|(?:(?:personal|professional|learning\s+(?:and|&)|learning|career)\s+development|"
+    r"(?:personal\s+)?wellness|well[- ]being|home\s+office|equipment|conference|laundry|meals?)\s+"
+    r"(?:budget|allowance|stipend|reimbursement))\s*(?:(?:of|is|at|up\s+to|[:=])\s*)*$|"
+    r"\btechnology\s+stipend\s*(?:[-–—]\s*)?(?:equivalent\s+to\s*)?$", re.I,
+)
+_PERK_AMOUNT_RIGHT = re.compile(
+    r"^\s*(?:/\s*(?:USD|INR|EUR|GBP|CAD|AUD)\b)?\s*"
+    r"(?:/\s*(?:months?|mos?|years?|yrs?)\b)?\s*"
+    r"(?:(?:[\w]+\s+)?[\w]+['’]s\s+)?"
+    r"(?:(?:annual|yearly|monthly)\s+)?"
+    r"(?:(?:personal|professional|learning\s+(?:and|&)|learning|career)\s+development|"
+    r"(?:personal\s+)?wellness|well[- ]being|home\s+office|equipment|conference|laundry)\s+"
+    r"(?:budget|allowance|stipend|reimbursement)\b", re.I,
+)
+_BUSINESS_COST_LEFT = re.compile(
+    r"\b(?:system\s+migrations?|migrations?|software|infrastructure|operations?|"
+    r"business\s+operations?|office\s+rent|marketing\s+campaigns?)\s+"
+    r"(?:costs?|expenses?)\s*(?:(?:of|over|about|more\s+than|up\s+to|[:=])\s*)*$", re.I,
+)
+_MEAL_AMOUNT_RIGHT = re.compile(
+    r"^\s*(?:/\s*(?:months?|mos?|years?|yrs?)\b)?\s*"
+    r"(?:(?:annual|yearly|monthly)\s+)?"
+    r"(?:meals?\s+(?:allowance|stipend|budget)|(?:allowance|stipend|budget)\s+for\s+meals?)\b", re.I,
+)
+_COMPANY_VALUE_LEFT = re.compile(r"\bcompany\s+valued\s+(?:at|above|over)\s*$", re.I)
+_INSURANCE_VALUE_LEFT = re.compile(
+    r"\b(?:(?:high[- ]value|motor|insurance)\s+)*claims?\s*,?\s*"
+    r"(?:(?:are|is)\s+)?(?:(?:typically|initially|each)\s+)?(?:valued|worth)\s*"
+    r"(?:(?:at|above|over|more\s+than|up\s+to|between|from)\s*)*$", re.I,
+)
+_INSURANCE_VALUE_RIGHT = re.compile(
+    r"^\s*(?:(?:in|of|worth\s+of)\s+)?(?:motor|insurance)\s+claims?\b", re.I,
+)
+_INSURANCE_AUTHORITY_LEFT = re.compile(
+    r"\b(?:motor|insurance|bodily\s+injury)\s+claims?\b.{0,90}\b"
+    r"(?:current\s+)?(?:settlement\s+|payment\s+)?authority\s*"
+    r"(?:(?:of|at|least|above|over|up\s+to)\s*)*$",re.I,
+)
+_BUSINESS_SIZE_LEFT = re.compile(
+    r"\b(?:markets?|industry)\s+(?:(?:expected|estimated|projected|forecast|worth|to|reach|over|at|of|[:=])\s*)*$|"
+    r"\bcompany\s*[-—–]?\s*(?:privately\s+)?valued\s+(?:(?:at|over|above)\s*)*$|"
+    r"\b(?:completed|delivered)\s+\d+\s+projects?\s+(?:worth|valued\s+at)\s*$",re.I,
+)
+_BUSINESS_SIZE_RIGHT = re.compile(
+    r"^\s*\+?\s*(?!(?:per|hourly|monthly|yearly|annual|fixed|for)\b)"
+    r"(?:[\w-]+\s+){0,5}(?:industry|markets?|company|outcome|problem)\b",re.I,
+)
+_DESIGNATED_BENEFIT_LEFT = re.compile(
+    r"\b(?:corporate\s+)?benefits?\s+program(?:me)?\b.{0,120}\b(?:health|mobility|learning)\b.{0,100}\bfor\s*$|"
+    r"\b(?:tickets?|titres?)\s+restaurant\s*(?:(?:d['’]une\s+valeur\s+de|de)\s*)?$|"
+    r"^\s*(?:carte\s+[\w-]+\s+créditée\s+de)\s*$",re.I,
+)
+_GRANTMAKING_AMOUNT_LEFT = re.compile(
+    r"\b(?:total\s+)?grantmaking\s*(?:(?:is|was|likely|to|approach|or|even|exceed|exceeds|of|over|[:=])\s*)*$",re.I,
+)
+_CASH_BENEFIT_LEFT = re.compile(
+    r"\b(?:housing|proximity|relocation|sign[- ]on|signing)\s+(?:bonus|allowance|stipend|grant|payment)"
+    r"\s*(?:(?:of|is|at|up\s+to|[:=])\s*)*$|"
+    r"\bparticipation\s+annuelle\s+aux\s+bénéfices\b.{0,80}\bde\s*$", re.I,
+)
+_CASH_BENEFIT_RIGHT = re.compile(
+    r"^\s*(?:(?:/\s*|per\s+|a\s+)(?:months?|years?|annum)\s+)?"
+    r"(?:(?:monthly|annual|yearly|one[- ]time)\s+)?"
+    r"(?:housing|proximity|relocation|sign[- ]on|signing)\s+(?:bonus|allowance|stipend|grant|payment)\b", re.I,
+)
+
+
+def _cash_benefit_context(quote):
+    spans = money_expression_spans(quote)
+    if not spans:
+        return False
+    for start, end in spans:
+        left, right = quote[max(0,start-120):start], quote[end:end+120]
+        # A project budget to build a benefit workflow belongs to the buyer.
+        if re.search(r"\b(?:project\s+budget|fixed\s+budget|hourly\s+(?:pay|rate)|base\s+salary)"
+                     r"\s*(?:(?:of|is|at|[:=])\s*)*$",left,re.I):
+            return False
+        if not (_CASH_BENEFIT_LEFT.search(left) or _CASH_BENEFIT_RIGHT.search(right)):
+            return False
+    return True
+
+
+def _business_amount_context(quote):
+    """Every amount must refer to finances, expenses or perks to exclude it."""
+    spans = money_expression_spans(quote)
+    if not spans:
+        return False
+    previous_end = None
+    for start, end in spans:
+        left, right = quote[max(0, start-180):start], quote[end:end+180]
+        if _PERK_AMOUNT_LEFT.search(left) or _BUSINESS_COST_LEFT.search(left) or _DESIGNATED_BENEFIT_LEFT.search(left):
+            continue
+        if _OWN_WAGE_LEFT.search(left):
+            return False
+        attached = bool(_BUSINESS_AMOUNT_LEFT.search(left) or _BUSINESS_AMOUNT_RIGHT.search(right)
+                        or _PERK_AMOUNT_RIGHT.search(right) or _MEAL_AMOUNT_RIGHT.search(right)
+                        or _COMPANY_VALUE_LEFT.search(left) or _INSURANCE_VALUE_LEFT.search(left)
+                        or _INSURANCE_VALUE_RIGHT.search(right) or _INSURANCE_AUTHORITY_LEFT.search(left)
+                        or _BUSINESS_SIZE_LEFT.search(left) or _GRANTMAKING_AMOUNT_LEFT.search(left) or (
+                            re.search(r'\b(?:billion|trillion)\b|\d\s*[bB]\b',quote[start:end],re.I)
+                            and _BUSINESS_SIZE_RIGHT.search(right)))
+        # A literal range shares the same attached subject. Do not propagate
+        # ownership past a new labelled clause or an unlabelled alternative.
+        if not attached and previous_end is not None:
+            attached = bool(re.fullmatch(r'\s*(?:to|[-–—])\s*', quote[previous_end:start], re.I))
+        if not attached and _RAISED_AMOUNT_LEFT.search(left):
+            attached = True
+        if not attached and re.search(r'\bmanage\s+(?:more\s+than\s+|over\s+)?$', left, re.I):
+            attached = bool(re.search(r'^\s*(?:billion\b|[bB]\b)?\s+for\b.{0,80}\binvestors?\b', right, re.I))
+        if not attached and re.search(r'\bsecured\s*$', left, re.I):
+            attached = bool(re.search(r'\b(?:series\s+[A-Z]|funding|financing|growth\s+investment)\b', right, re.I))
+        if not attached:
+            return False
+        previous_end = end
+    return True
+
+
+def _platform_pool_amount_context(quote):
+    """Bind every amount to an explicit platform-wide distribution statement."""
+    spans = money_expression_spans(quote)
+    if not spans or re.search(r'\b(?:each|per\s+(?:worker|person|contractor|expert))\b', quote, re.I):
+        return False
+    for start, end in spans:
+        left, right = quote[max(0, start-180):start], quote[end:end+180]
+        if _OWN_WAGE_LEFT.search(left):
+            return False
+        group_recipient = (re.search(r'\bmoves\s+(?:over\s+|more\s+than\s+)?$', left, re.I)
+            and re.match(r'\s*(?:a|per)\s+day\s+to\s+(?:hundreds|thousands|millions)\b'
+                         r'.{0,80}\b(?:experts|workers|contractors|people)\b', right, re.I))
+        platform_total = (re.search(r'\bplatform\b.{0,160}\bpays\s+out\s+(?:over\s+|more\s+than\s+)?$', left, re.I)
+            and re.match(r'\s*(?:a|per)\s+day\b', right, re.I))
+        if not (group_recipient or platform_total):
+            return False
+    return True
+
+
 def _pay_context_scope(quote, title):
     """Explicit attribution only; keep rejected claims available for inspection."""
     # Denying an expense does not turn the adjacent wage into an expense.
@@ -429,9 +607,9 @@ def _pay_context_scope(quote, title):
         r"\b(?:no|without|zero)\s+(?:application\s+fees?|security\s+deposits?|subscription\s+costs?)\b",
         "", quote, flags=re.I,
     )
-    if re.search(
+    if _business_amount_context(quote) or re.search(
         r"\b(?:applicants?|candidates?|you)\s+(?:must\s+|will\s+)?pay\b|"
-        r"\b(?:company revenue|annual revenue|funding raised|subscription costs?|application fees?|security deposit)\b|"
+        r"\b(?:subscription costs?|application fees?|security deposit)\b|"
         r"\b(?:training\s+example(?:\s+only)?\s*:|example\s+only\b)|"
         r"\b(?:illustrative|fictional|hypothetical)\s+(?:pay|rate|wage|salary|amount|figure|example)\b|"
         r"\b(?:pay|rate|wage|salary|amount|figure)\s+(?:is|are)\s+(?:purely\s+)?(?:illustrative|fictional|hypothetical)\b|"
@@ -444,6 +622,22 @@ def _pay_context_scope(quote, title):
         r"\b(?:comment\s+by|previous\s+worker|i\s+(?:earned|was\s+paid))\b", quote, re.I,
     ):
         return "other_assignment"
+    # A dated cohort average is not a current offer for this worker. Preserve
+    # an explicit wage attached to its own amount when it merely cites a benchmark.
+    amount_spans=money_expression_spans(quote)
+    if amount_spans and re.search(r'\b(?:moyenne|moyen)\b.{0,100}\b20\d{2}\b',quote,re.I):
+        if all(not _OWN_WAGE_LEFT.search(quote[max(0,start-120):start])
+               for start,_ in amount_spans):
+            return 'other_assignment'
+    if _platform_pool_amount_context(quote):
+        return 'other_assignment'
+    if (re.search(r'\b(?:millions|thousands|hundreds)\s+of\s+(?:domain\s+)?'
+                  r'(?:experts|workers|contractors|people)\b.{0,100}\b(?:are|were)\s+paid\b', quote, re.I)
+            and re.search(r'\b(?:on|across)\s+(?:(?:the|our|this)\s+)?platform\b', quote, re.I)
+            and (parse_compensation(quote).basis != 'labor_hour'
+                 or re.search(r'\b(?:in\s+total|collectively|combined)\b', quote, re.I))
+            and not re.search(r'\b(?:each|per\s+(?:worker|person|contractor|expert))\b', quote, re.I)):
+        return 'other_assignment'
     # Explicit pay subjects may describe another rung of the same team.
     subject = re.match(
         r"\s*(?:our\s+|the\s+)?(supervisors?|managers?|directors?|evaluators?|reviewers?|annotators?|trainers?)"
@@ -453,6 +647,14 @@ def _pay_context_scope(quote, title):
         rf"\b{re.escape(subject[1].rstrip('s'))}s?\b", title, re.I
     ):
         return "other_assignment"
+    if _cash_benefit_context(quote):
+        return "role_benefit_unverified"
+    # A truncated aggregate snippet loses its financial subject. Its scale is
+    # literal evidence, while ownership remains unknown rather than assumed pay.
+    if (amount_spans and re.search(r'\bwith\s+(?:over|more\s+than)\s*$',quote[:amount_spans[0][0]],re.I)
+            and re.search(r'\b(?:billion|trillion)\b|\d\s*[bB]\b',quote,re.I)
+            and re.search(r'\bin\s+(?:an?|the)\s*…\s*$',quote,re.I)):
+        return 'unattributed_amount'
     return "role_claim_unverified"
 
 
@@ -463,6 +665,18 @@ def _bind_pay_span(item, text, start, end, document, title=""):
     item.source_text_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
     item.actor = "posting_author_unverified"
     item.scope = _pay_context_scope(item.raw, title)
+    amounts = money_expression_spans(item.raw)
+    if len(amounts) == 1:
+        begin, finish = amounts[0]
+        before, after = item.raw[:begin], item.raw[finish:]
+        prefix = re.search(r"\b(gross|net|brut|bruts|nette|nettes)\s*(?:(?:base\s+)?(?:pay|salary|salaire)\s*)?[:=]?\s*$",before,re.I)
+        suffix = re.match(r"\s*(?:fixe\s+)?(gross|net|brut|bruts|nette|nettes)\b",after,re.I)
+        interpretations = {'gross' if match[1].casefold() in {'gross','brut','bruts'} else 'net'
+                           for match in (prefix,suffix) if match}
+        if len(interpretations) == 1:
+            item.gross_net = interpretations.pop()
+        elif len(interpretations) > 1:
+            item.parse_warnings.append('conflicting_gross_net_claims')
     if not document.actionable:
         item.scope = "non_opportunity_document"
     if item.scope == "other_assignment":
@@ -474,16 +688,58 @@ def _bind_pay_span(item, text, start, end, document, title=""):
     return item
 
 
+_INDEPENDENT_MONEY_CLAUSE = re.compile(
+    r"(?:,\s*(?:(?:and|but|while|whereas|plus)\s+)?|\s+(?:and|but|while|whereas|plus)\s+)"
+    r"(?=(?:(?:base|annual|hourly|monthly|weekly|fixed[- ]price)\s+)?"
+    r"(?:salary|compensation|wages?|pay\b|project\s+budget|budget\b)|"
+    r"(?:(?:our|company|annual|monthly)\s+)*(?:revenues?|valuation|funding)\b|"
+    r"we(?:['’]ve|\s+have)?\s+raised\b|"
+    r"(?:housing|proximity|relocation|sign[- ]on|signing)\s+(?:bonus|allowance|stipend|grant|payment)\b)", re.I,
+)
+
+
+def _independent_pay_spans(text, left, right):
+    """Split explicit labelled facts between amounts, preserving literal offsets."""
+    amounts = money_expression_spans(text[left:right])
+    if len(amounts) < 2:
+        yield left, right
+        return
+    cuts=[]
+    for boundary in _INDEPENDENT_MONEY_CLAUSE.finditer(text, left, right):
+        if (any(left+end <= boundary.start() for _, end in amounts)
+                and any(left+start >= boundary.end() for start, _ in amounts)):
+            cuts.append(boundary.span())
+    # "$10K housing bonus" labels its amount on the right. Keep its own
+    # qualifiers/conditions without folding it into the preceding base wage.
+    for (_,previous_end),(start,end) in zip(amounts,amounts[1:]):
+        if not _CASH_BENEFIT_RIGHT.search(text[left+end:right]):
+            continue
+        between=text[left+previous_end:left+start]
+        join=re.search(r",\s*(?:(?:and|plus)\s+)?|\s+(?:and|plus)\s+|\s*\+\s*",between,re.I)
+        if join:
+            cuts.append((left+previous_end+join.start(),left+previous_end+join.end()))
+    cursor = left
+    for begin,finish in sorted(set(cuts)):
+        if begin < cursor:
+            continue
+        yield cursor,begin
+        cursor=finish
+    yield cursor, right
+
+
 def _prose_pay_candidates(text, field, observation, document, marketplace=False):
     # Split only explicit sentence/line boundaries, retaining decimal punctuation.
-    # Multiple claims within one clause abstain in the single-claim parser. Do not
+    # Independently labelled clauses are split; unlabelled multiple claims still
+    # abstain in the single-claim parser. Do not
     # use folded-string offsets to slice the original field.
     # Upwork search snippets use literal dots around range dashes and Hourly.
     # Protect those already-recognized rate spans from sentence splitting.
     protected = [m.span() for m in _MARKETPLACE_HOURLY.finditer(fold_dashes(text))] if marketplace else []
     boundaries = [0, *[m.end() for m in re.finditer(r"\n|[;!?]|\.(?=\s|$)", text)
                       if not any(a <= m.start() < b for a, b in protected)], len(text)]
-    for left, right in zip(boundaries, boundaries[1:]):
+    spans = (span for left, right in zip(boundaries, boundaries[1:])
+             for span in _independent_pay_spans(text, left, right))
+    for left, right in spans:
         span = text[left:right]
         if not _CURRENCY.search(span):
             continue
@@ -492,7 +748,12 @@ def _prose_pay_candidates(text, field, observation, document, marketplace=False)
         quote = text[start:end]
         source_field = "marketplace_snippet" if marketplace else field
         confidence = .95 if marketplace else .85 if field == "title" else .70
-        item = _candidate(quote, source_field, observation.observation_id, confidence, observation.source_kind)
+        headings=list(re.finditer(r'(?im)^\s*(compensation|pay|salary|benefits|responsibilities|requirements|about us)\s*:?\s*$',text[:start]))
+        list_item=(field=='description' and bool(headings)
+                   and headings[-1][1].casefold() in {'compensation','pay','salary','benefits'}
+                   and bool(re.match(r'^-\s+\S',quote))
+                   and not re.search(r'\b(?:negative|deduct(?:ed|ion)?|clawback|repay(?:ment)?)\b',quote,re.I))
+        item = _candidate(quote, source_field, observation.observation_id, confidence, observation.source_kind,list_item=list_item)
         if item is None:
             continue
         # Bare fixed budgets are only inferred on an individual buyer route.
@@ -514,6 +775,12 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
     """Collect candidates from every non-farm observation and select by credibility."""
     candidates: list[PayCandidate] = []
     seen: set[tuple] = set()
+    thread_parent_ids = set()
+    if CONFIG.v55.enabled:
+        from .community import observation_thread, bind_pay_actor
+        for row in canonical.observations:
+            if row.origin == 'hydration' and row.identity_state in {'exact', 'corroborated'} and observation_thread(row):
+                thread_parent_ids.update(row.parent_observation_ids)
     has_non_farm = any(
         observation.job is not None
         and observation.source_kind != SourceKind.CONTENT_FARM
@@ -526,8 +793,8 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
         ):
             continue
         if CONFIG.v55.enabled:
-            from .documents import classify_document
-            document = classify_document(job.title, job.description or "", job.url)
+            from .documents import classify_observation
+            document = classify_observation(observation)
         if job.pay_raw:
             source_field = "email" if job.source.startswith("email:") else "structured"
             confidence = 0.98 if source_field == "email" else 0.95
@@ -539,6 +806,18 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
             if item is not None:
                 if CONFIG.v55.enabled:
                     _bind_pay_span(item, job.pay_raw, 0, len(job.pay_raw), document, job.title)
+                    if job.source == 'first_party' and isinstance(observation.raw_payload.get('baseSalary'), dict):
+                        # The normalized literal is derived from this exact
+                        # native payload; its string offsets are not JSON offsets.
+                        import json
+                        item.structured_path = '/baseSalary'
+                        try:
+                            item.structured_payload_sha256 = hashlib.sha256(json.dumps(
+                                observation.raw_payload['baseSalary'], sort_keys=True, separators=(',', ':'),
+                                ensure_ascii=False, allow_nan=False,
+                            ).encode()).hexdigest()
+                        except (TypeError, ValueError):
+                            item.parse_warnings.append('structured_provenance_unavailable')
                 key = (item.raw.casefold(), item.source_field, item.observation_id)
                 if key not in seen:
                     seen.add(key)
@@ -635,6 +914,13 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
                     seen.add(key)
                     candidates.append(item)
 
+    if CONFIG.v55.enabled:
+        observations = {o.observation_id: o for o in canonical.observations}
+        for candidate in candidates:
+            if candidate.observation_id in thread_parent_ids:
+                candidate.actor, candidate.scope = 'unattributed_copy', 'unattributed_thread_copy'
+            elif observations[candidate.observation_id].source == 'community_thread':
+                bind_pay_actor(candidate, observations[candidate.observation_id])
     observations_by_id = {o.observation_id: o for o in canonical.observations}
 
     def lineage(identifier):
@@ -695,8 +981,9 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
         item.raw.casefold(),
     ))
     selectable = [c for c in candidates if not CONFIG.v55.enabled or c.scope not in {
-        "non_opportunity_document", "other_assignment", "non_pay_context",
-    }]
+        "non_opportunity_document", "other_assignment", "non_pay_context", "unattributed_thread_copy",
+        "historical_thread_terms", "unresolved_thread_terms", "role_benefit_unverified", "unattributed_amount",
+    } and not c.scope.startswith('community_benefit:')]
     selected = selectable[0] if selectable else None
     if selected is not None:
         selected.selection_reasons.append("highest_claim_credibility")

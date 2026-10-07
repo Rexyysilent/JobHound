@@ -29,6 +29,22 @@ def test_public_starter_disables_network_sources_and_delivery():
     assert not config.email_ingest.enabled and not config.digest.channels
     assert not config.scam.llm.enabled and not config.incidents.enabled
     assert not config.v55.enabled and not config.v55.account_states
+    assert not config.v55.production_approved
+    assert not config.delivery.enabled and not config.delivery.production_approved
+
+
+def test_neutral_starter_initializes_and_runs_demo_without_inventing_qualifications(tmp_path):
+    from jobhound import local_state
+    from jobhound.local_demo import demonstrate
+    root=tmp_path/'local'
+    local_state.initialize(root,'blank')
+    policy=root/'profiles/blank/profile.yaml'
+    before=policy.read_bytes()
+    result=demonstrate(root,'blank')
+    assert result['accounting_ok'] and result['calls']==dict(network=0,provider=0)
+    assert result['decisions']['discovery']=='skip'
+    assert policy.read_bytes()==before
+    assert local_state.doctor(root,'blank')['ok']
 
 
 def test_config_example_fallback_preserves_explicit_local_precedence(tmp_path, monkeypatch):
@@ -58,7 +74,10 @@ def test_profile_example_fallback_does_not_override_a_local_profile(tmp_path, mo
 
 
 @pytest.mark.parametrize("name", [".env", ".env.backup", "profile.yaml", "data/state.db",
-                                 "roadmap/review.json", "private/memo.md", "keys/service.pem"])
+                                 "roadmap/review.json", "private/memo.md", "keys/service.pem",
+                                 "runtime/request-ledger.json", "state/snapshot.jsonl",
+                                 "profiles/local/config.yaml", "reviews/audit.json",
+                                 "backups/manifest.json", ".jobhound-local.json"])
 def test_private_paths_cannot_pass_publication(name):
     assert checker.private_path(name)
 

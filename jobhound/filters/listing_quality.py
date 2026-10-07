@@ -75,7 +75,17 @@ _HIRING_IN_TITLE = re.compile(
 )
 _CONTENT_PATH = re.compile(r"/(blog|guide|article|news|resources)(?:/|$)", re.IGNORECASE)
 _CONTENT_TITLE = re.compile(r"^(?:how to|guide|tips)\b|\bhow to (?:find|get)\b", re.IGNORECASE)
+_RESOURCE_TITLE = re.compile(
+    r"^companies\s+(?:offering|with|hiring\s+for)\b.{0,100}\b(?:jobs|roles|work)\b|"
+    r"\b(?:jobs|roles)\s*(?:&|and)\s*(?:platforms|websites)"
+    r"(?:\s*(?:[|–—-].*|\.{3}|…))?\s*$",
+    re.IGNORECASE,
+)
 _NON_JOB_PUBLISHERS = {"ai supermarket"}
+
+# These hosted board copies cannot establish an original employer or vacancy.
+# Assess the retained URL only: a resolved original must remain usable.
+UNVERIFIED_JOB_BOARD_HOSTS = ("is-great.org", "my-board.org")
 
 FREE_HOSTS = (
     "railway.app", "unaux.com", "epizy.com", "rf.gd",
@@ -204,6 +214,10 @@ def farm_source_check(url: str, company_domain: str | None = None,
     direct ATS/employer link for this record, a farm entry in `seen_on` must not
     reject it — the canonical URL is assessed on its own merits.
     """
+    host = (urlparse(url).hostname or "").casefold().rstrip(".")
+    for suffix in UNVERIFIED_JOB_BOARD_HOSTS:
+        if host == suffix or host.endswith("." + suffix):
+            return [f"junk:unresolved_hosted_job_board:{suffix}"]
     tier, _ = domain_tier(url, company_domain, cfg)
     if tier == "farm":
         return [f"junk:source_farm:{_base_domain(url)}"]
@@ -231,6 +245,32 @@ def absurd_language_check(title: str) -> list[str]:
     return [f"scam:absurd_language:{match.group(1).lower()}"]
 
 
+def employer_location_statement(text: str) -> bool:
+    """An employer address is not an applicant residence requirement."""
+    if re.search(r"\b(?:applicants?|candidates?|you|residents?|citizens?)\b|"
+                 r"\b(?:must|required\s+to|will)\s+(?:be|live|reside|work|relocate)\b|"
+                 r"\b(?:this|the)\s+(?:role|position|job)\s+is\b", text, re.I):
+        return False
+    return bool(re.search(
+        r"\b(?:headquartered|headquarters)\b|"
+        r"\b(?:(?i:our\s+(?:company|business|team)|we)|[A-Z][\w&-]*)\s+(?:is|are)\b[^.;]{0,60}\b(?:based|located)\s+in\b",
+        text,
+    ))
+
+
+def geographic_alias(alias: str, text: str, *, structured: bool = False) -> bool:
+    """Short country codes need geographic syntax, not a pronoun match."""
+    token = re.escape(alias)
+    if alias in {'us', 'u.s.', 'uk', 'eu'} and not structured:
+        return bool(re.search(
+            rf"\b(?:in|within|across|outside|except|excluding|remote|location\s*:)\s+(?:the\s+)?{token}(?!\w)|"
+            rf"\b(?:applicants?|candidates?|remote|work|working)\s+from\s+(?:the\s+)?{token}(?!\w)|"
+            rf"(?<!\w){token}[\s-]+(?:based|only|residents?|citizens?|time\s*zones?|remote)\b",
+            text, re.I,
+        ))
+    return bool(re.search(rf"(?<!\w){token}(?!\w)", text, re.I))
+
+
 def region_lock_check(title: str, description: str = "", *, polarity_aware: bool = False) -> list[str]:
     """Reject explicit non-India country locks even when a job says remote."""
     text = f"{title}\n{(description or '')[:600]}"
@@ -241,6 +281,13 @@ def region_lock_check(title: str, description: str = "", *, polarity_aware: bool
         _REGION_PAREN, _REGION_PHRASE, _REGION_CITY_COUNTRY, _REGION_LINE
     ):
         for match in pattern.finditer(text):
+            # Inspect the matched sentence, not the entire document: a company
+            # biography must not erase a later real applicant restriction.
+            left = max(text.rfind('.', 0, match.start()), text.rfind('\n', 0, match.start()), text.rfind(';', 0, match.start())) + 1
+            ends = [i for i in (text.find('.', match.end()), text.find('\n', match.end()), text.find(';', match.end())) if i >= 0]
+            sentence = text[left:min(ends) if ends else len(text)]
+            if employer_location_statement(sentence):
+                continue
             if polarity_aware:
                 # Match-local polarity, not a whole-description "not" switch.
                 # A later positive lock must still be checked.
@@ -260,12 +307,22 @@ def content_page_check(title: str, url: str) -> list[str]:
     """Identify editorial pages and bare homepages, not job detail pages."""
     parsed = urlparse(url)
     reasons: list[str] = []
-    if _CONTENT_PATH.search(parsed.path or "/"):
-        reasons.append("junk:content_page_url")
+    reasons.extend(resource_page_check(title, url))
     if _CONTENT_TITLE.search(title.strip()):
-        reasons.append("junk:content_page_title")
+        if "junk:content_page_title" not in reasons:
+            reasons.append("junk:content_page_title")
     if (parsed.path or "/") == "/" and not parsed.query:
         reasons.append("junk:root_domain")
+    return reasons
+
+
+def resource_page_check(title: str, url: str) -> list[str]:
+    """Specific resource/roundup signals; role words cannot turn these into vacancies."""
+    reasons = []
+    if _CONTENT_PATH.search(urlparse(url).path or "/"):
+        reasons.append("junk:content_page_url")
+    if _RESOURCE_TITLE.search(title.strip()):
+        reasons.append("junk:content_page_title")
     return reasons
 
 

@@ -1,18 +1,19 @@
 """Reviewed, scoped outcome facts. Pure projection; no mail, network or stores.
 
-This first slice deliberately accepts only the predicates needed for application,
-assessment, access and buyer-scope review. It cannot establish collected payment.
+Private observations are reviewed claims, never authenticated provider receipts.
+Application, assessment, allocation and payment subjects remain separate.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime,timezone
+from decimal import Decimal
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, field_validator, model_serializer, model_validator
 
 MAX_JOURNAL_EVENTS = 5000
 
@@ -45,6 +46,9 @@ class OutcomeBinding(StrictModel):
     observation_id: str = Field(min_length=1, max_length=160)
     role_url: str = Field(min_length=1, max_length=2048)
     reviewed: Literal[True]
+    # Historical attempts remain bound/importable; only the reviewed selection
+    # may refine the public role's action. Existing single bindings stay active.
+    active: StrictBool = True
 
 
 class ActionChecks(StrictModel):
@@ -55,10 +59,100 @@ class ActionChecks(StrictModel):
 
 
 class ActionCost(StrictModel):
-    minutes: float | None = Field(default=None, ge=0, le=10000)
+    minutes: float | None = Field(default=None, strict=True, allow_inf_nan=False, ge=0, le=10000)
     cash: float | None = Field(default=None, ge=0, le=100000)
     currency: str = Field(default='USD', pattern=r'^[A-Z]{3}$')
     basis: Literal['measured', 'user_estimate', 'provider_estimate']
+
+
+class AssessmentIdentity(StrictModel):
+    """Opaque provider step and terms revision within one application attempt."""
+    step_id: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+    revision: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+
+
+class WorkIdentity(StrictModel):
+    """One project/allocation/terms revision within the bound account attempt."""
+    project_id: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+    allocation_id: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+    revision: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+
+
+class MoneyClaim(StrictModel):
+    # Explicit decimal text and currency: no bool/string-to-float ambiguity,
+    # default currency, conversion, aggregation or implied full settlement.
+    amount: str = Field(pattern=r'^(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?$')
+    currency: str = Field(pattern=r'^[A-Z]{3}$')
+    reference: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+
+    @field_validator('amount')
+    @classmethod
+    def positive_amount(cls, value):
+        if Decimal(value) <= 0:
+            raise ValueError('positive_amount_required')
+        return value
+
+
+class WorkTerms(MoneyClaim):
+    unit: Literal['labor_hour', 'task', 'deliverable']
+
+
+class WorkChecks(ActionChecks):
+    scope: StrictBool | None = None
+    terms: StrictBool | None = None
+    economics: StrictBool | None = None
+
+
+class WorkCost(StrictModel):
+    minutes: float | None = Field(default=None, strict=True, allow_inf_nan=False, ge=0, le=10000)
+    cash: float | None = Field(default=None, strict=True, allow_inf_nan=False, ge=0, le=100000)
+    currency: str | None = Field(default=None, pattern=r'^[A-Z]{3}$')
+    basis: Literal['measured', 'user_estimate', 'provider_estimate']
+
+    @model_validator(mode='after')
+    def explicit_cash_currency(self):
+        if self.cash is not None and self.currency is None:
+            raise ValueError('cash_currency_required')
+        return self
+
+
+class ActionDeadline(StrictModel):
+    """An explicit counterparty due time for this exact step or allocation."""
+    due_at: AwareDatetime
+    minimum_lead_minutes: float | None = Field(default=None,strict=True,allow_inf_nan=False,ge=0,le=10000)
+
+    @field_validator('due_at',mode='before')
+    @classmethod
+    def explicit_due_time(cls,value):
+        if not isinstance(value,(str,datetime)):
+            raise ValueError('explicit_aware_due_time_required')
+        return datetime.fromisoformat(value.replace('Z','+00:00')) if isinstance(value,str) else value
+
+    @field_validator('due_at')
+    @classmethod
+    def canonical_due_time(cls,value):
+        return value.astimezone(timezone.utc)
+
+
+ASSESSMENT_PREDICATES = {'assessment_state', 'assessment_route', 'action_checks', 'action_cost', 'assessment_deadline'}
+WORK_ENUMS = {
+    'allocation_state': {'allocated', 'revoked', 'finished'},
+    'work_access': {'accessible', 'blocked'},
+    'payment_setup': {'verified', 'blocked', 'pending'},
+    'payable_approval': {'approved', 'pending', 'denied'},
+    'work_state': {'submitted', 'accepted'},
+}
+WORK_PREDICATES = {*WORK_ENUMS, 'work_terms', 'work_checks', 'work_cost',
+                   'work_route', 'invoice', 'collected_payment', 'work_deadline'}
+
+
+def predicate_key(predicate: str, assessment: AssessmentIdentity | None = None,
+                  work: WorkIdentity | None = None) -> str:
+    if work is not None:
+        return 'work:' + json.dumps(work.model_dump(), sort_keys=True, separators=(',', ':')) + ':' + predicate
+    if assessment is None:
+        return predicate
+    return 'assessment:' + json.dumps(assessment.model_dump(), sort_keys=True, separators=(',', ':')) + ':' + predicate
 
 
 _ENUMS = {
@@ -67,16 +161,18 @@ _ENUMS = {
     'project_access': {'blocked', 'accessible'},
     'buyer_reply': {'substantive', 'scope_changed'},
 }
-_PREDICATES = {*_ENUMS, 'scope_revision', 'agreed_scope_revision',
-               'assessment_route', 'action_checks', 'action_cost'}
+_PREDICATES = {*_ENUMS, *WORK_PREDICATES, 'scope_revision', 'agreed_scope_revision',
+               *ASSESSMENT_PREDICATES, 'assessment_step', 'work_selection'}
 
 
 class OutcomeEvent(StrictModel):
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2, 3]
     event_id: str = Field(min_length=1, max_length=160, pattern=r'^[\w.:-]+$')
     scope: OutcomeScope
     predicate: str
-    value: str | ActionChecks | ActionCost
+    value: str | ActionChecks | ActionCost | AssessmentIdentity | WorkIdentity | WorkTerms | WorkChecks | WorkCost | MoneyClaim | ActionDeadline
+    assessment: AssessmentIdentity | None = None
+    work: WorkIdentity | None = None
     actor: Literal['user', 'provider', 'buyer']
     source_kind: Literal['user_report', 'mail', 'community', 'reviewed_seed']
     evidence_ref: str = Field(min_length=1, max_length=160, pattern=r'^[\w.:-]+$')
@@ -90,6 +186,15 @@ class OutcomeEvent(StrictModel):
     reviewed: Literal[True]
     supersedes: list[str] = Field(default_factory=list, max_length=20)
 
+    @model_serializer(mode='wrap')
+    def preserve_legacy_shape(self, handler):
+        data = handler(self)
+        if self.assessment is None:
+            data.pop('assessment', None)
+        if self.work is None:
+            data.pop('work', None)
+        return data
+
     @field_validator('schema_version', mode='before')
     @classmethod
     def integer_version(cls, value):
@@ -97,22 +202,56 @@ class OutcomeEvent(StrictModel):
             raise ValueError('integer_schema_version_required')
         return value
 
+    @field_validator('value', mode='before')
+    @classmethod
+    def typed_work_value(cls, value, info):
+        # Several cost/check models share fields. The predicate, rather than
+        # union ordering, establishes the version-3 value contract.
+        expected = {'work_selection': WorkIdentity, 'work_terms': WorkTerms,
+                    'work_checks': WorkChecks, 'work_cost': WorkCost,
+                    'invoice': MoneyClaim, 'collected_payment': MoneyClaim,
+                    'assessment_deadline':ActionDeadline,'work_deadline':ActionDeadline}
+        model = expected.get(info.data.get('predicate'))
+        return model.model_validate(value) if model is not None else value
+
     @model_validator(mode='after')
     def supported_fact(self):
         if self.predicate not in _PREDICATES:
             raise ValueError('unsupported_predicate')
-        if self.predicate in _ENUMS and (
-            not isinstance(self.value, str) or self.value not in _ENUMS[self.predicate]
+        if self.predicate=='assessment_deadline' and (self.schema_version!=2 or self.assessment is None):
+            raise ValueError('assessment_deadline_requires_exact_step')
+        if self.assessment is not None or self.predicate == 'assessment_step':
+            if self.schema_version != 2:
+                raise ValueError('assessment_identity_requires_version_2')
+        if self.work is not None or self.predicate in WORK_PREDICATES | {'work_selection'}:
+            if self.schema_version != 3:
+                raise ValueError('work_identity_requires_version_3')
+        if self.predicate in WORK_PREDICATES and self.work is None:
+            raise ValueError('work_identity_required')
+        if self.work is not None and self.predicate not in WORK_PREDICATES:
+            raise ValueError('work_identity_not_applicable')
+        if self.schema_version == 3 and self.predicate not in WORK_PREDICATES | {'work_selection'}:
+            raise ValueError('version_3_is_work_only')
+        if self.schema_version == 2 and self.predicate in ASSESSMENT_PREDICATES and self.assessment is None:
+            raise ValueError('assessment_identity_required')
+        if self.assessment is not None and self.predicate not in ASSESSMENT_PREDICATES:
+            raise ValueError('assessment_identity_not_applicable')
+        enums = _ENUMS | WORK_ENUMS
+        if self.predicate in enums and (
+            not isinstance(self.value, str) or self.value not in enums[self.predicate]
         ):
             raise ValueError('unsupported_value')
-        expected = {'action_checks': ActionChecks, 'action_cost': ActionCost}
+        expected = {'action_checks': ActionChecks, 'action_cost': ActionCost, 'assessment_step': AssessmentIdentity,
+                    'work_selection': WorkIdentity, 'work_terms': WorkTerms, 'work_checks': WorkChecks,
+                    'work_cost': WorkCost, 'invoice': MoneyClaim, 'collected_payment': MoneyClaim}
+        expected.update(assessment_deadline=ActionDeadline,work_deadline=ActionDeadline)
         if self.predicate in expected and not isinstance(self.value, expected[self.predicate]):
             raise ValueError('wrong_value_type')
         if self.predicate.endswith('scope_revision'):
             import re
             if not isinstance(self.value, str) or not re.fullmatch(r'[\w.-]{1,80}', self.value):
                 raise ValueError('invalid_scope_revision')
-        if self.predicate == 'assessment_route':
+        if self.predicate in {'assessment_route', 'work_route'}:
             if not isinstance(self.value, str):
                 raise ValueError('invalid_route')
             parts = urlsplit(self.value)
@@ -133,10 +272,16 @@ class OutcomeEvent(StrictModel):
             raise ValueError('community_cannot_establish_account_state')
         if self.predicate in {'buyer_reply', 'scope_revision'} and self.actor != 'buyer':
             raise ValueError('buyer_fact_requires_buyer')
-        if self.predicate in {'assessment_route'} and self.actor != 'provider':
+        if self.predicate in {'assessment_route', 'assessment_step', 'assessment_deadline'} and self.actor != 'provider':
             raise ValueError('provider_route_required')
         if self.predicate == 'action_checks' and self.actor != 'user':
             raise ValueError('checks_require_user_review')
+        if self.predicate in {'work_selection', 'work_checks', 'collected_payment'} and (
+                self.actor != 'user' or self.source_kind != 'user_report'):
+            raise ValueError('work_user_review_required')
+        if (self.predicate in {'allocation_state', 'payable_approval', 'work_terms', 'work_route', 'invoice', 'work_deadline'}
+                or self.predicate == 'work_state' and self.value == 'accepted') and self.actor not in {'provider', 'buyer'}:
+            raise ValueError('work_counterparty_authority_required')
         return self
 
 
@@ -147,13 +292,34 @@ class OutcomeProjection(StrictModel):
     conflicts: list[str]
     dispositions: dict[str, str]
 
-    def facts(self, predicate: str) -> list[OutcomeEvent]:
-        ids = set(self.current.get(predicate, []))
+    def facts(self, predicate: str, *, assessment: AssessmentIdentity | None = None,
+              work: WorkIdentity | None = None) -> list[OutcomeEvent]:
+        ids = set(self.current.get(predicate_key(predicate, assessment, work), []))
         return [e for e in self.events if e.event_id in ids]
 
-    def value(self, predicate: str):
-        facts = self.facts(predicate)
-        return facts[0].value if facts and predicate not in self.conflicts else None
+    def value(self, predicate: str, *, assessment: AssessmentIdentity | None = None,
+              work: WorkIdentity | None = None):
+        facts = self.facts(predicate, assessment=assessment, work=work)
+        return facts[0].value if facts and predicate_key(predicate, assessment, work) not in self.conflicts else None
+
+    def action_conflicts(self) -> list[str]:
+        """Historical assessment conflicts do not veto a different selected step."""
+        work = self.value('work_selection')
+        if isinstance(work, WorkIdentity):
+            relevant = {predicate_key(e.predicate, e.assessment, e.work) for e in self.events
+                        if e.work == work or e.predicate in {'work_selection', 'application_state', 'project_access'}}
+            if self.facts('work_state',work=work) or self.facts('invoice',work=work) or self.facts('collected_payment',work=work):
+                relevant.discard(predicate_key('work_deadline',work=work))
+            return [key for key in self.conflicts if key in relevant]
+        selected = self.value('assessment_step')
+        if not isinstance(selected, AssessmentIdentity):
+            return self.conflicts
+        relevant = {predicate_key(e.predicate, e.assessment) for e in self.events
+                    if (e.assessment == selected or
+                        e.assessment is None and e.predicate not in ASSESSMENT_PREDICATES)}
+        if self.value('assessment_state',assessment=selected) in {'completed','passed'}:
+            relevant.discard(predicate_key('assessment_deadline',assessment=selected))
+        return [key for key in self.conflicts if key in relevant]
 
 
 def _encoded(event: OutcomeEvent) -> str:
@@ -165,14 +331,18 @@ def project(events: list[OutcomeEvent], scope: OutcomeScope) -> OutcomeProjectio
     rows = sorted([e for e in events if e.scope == scope], key=lambda e: e.event_id)
     grouped: dict[str, list[OutcomeEvent]] = defaultdict(list)
     for event in rows:
-        grouped[event.predicate].append(event)
+        grouped[predicate_key(event.predicate, event.assessment, event.work)].append(event)
     current, conflicts, dispositions = {}, [], {}
     for predicate, facts in sorted(grouped.items()):
         removed = {old for e in facts for old in e.supersedes}
         for old in facts:
             for new in facts:
                 same_authority = (old.actor, old.source_kind) == (new.actor, new.source_kind)
-                terminal = predicate == 'application_state' and old.value in {'rejected', 'withdrawn'}
+                terminal = (old.predicate in {'assessment_deadline','work_deadline'} or
+                            old.predicate == 'application_state' and old.value in {'rejected', 'withdrawn'} or
+                            old.assessment is not None and old.predicate == 'assessment_state' and old.value in {'completed', 'passed'} or
+                            old.work is not None and (old.predicate in {'work_state', 'invoice', 'collected_payment'} or
+                                old.predicate == 'allocation_state' and old.value in {'revoked', 'finished'}))
                 if (same_authority and old.event_at and new.event_at and new.event_at > old.event_at
                         and not terminal and old.event_id not in new.supersedes):
                     removed.add(old.event_id)
@@ -245,7 +415,8 @@ def import_events(records: list[dict], bindings: list[OutcomeBinding], as_of: da
             for old_id in event.supersedes:
                 old = available.get(old_id)
                 if (old is None or old_id == identity or old.scope != event.scope
-                    or old.predicate != event.predicate or event.observed_at <= old.observed_at
+                    or old.predicate != event.predicate or old.assessment != event.assessment or old.work != event.work
+                    or event.observed_at <= old.observed_at
                     or (old.event_at and event.event_at and event.event_at <= old.event_at)
                     or (event.source_kind == 'reviewed_seed' and old.source_kind != 'reviewed_seed')):
                     invalid.append(identity)
@@ -274,6 +445,10 @@ def projection_hash(projection: OutcomeProjection) -> str:
 def compatibility_state(projection: OutcomeProjection) -> dict:
     mapping = {'application_state': 'application_state', 'assessment_state': 'assessment_state',
                'project_access': 'project_access', 'assessment_route': 'assessment_route'}
+    # A legacy attempt-wide completion/route is not the new step's state. Keep
+    # those facts in the journal, outside the selected revision's action inputs.
+    if projection.facts('assessment_step') or any(e.assessment is not None for e in projection.events):
+        mapping = {source: target for source, target in mapping.items() if source not in ASSESSMENT_PREDICATES}
     state = {target: projection.value(source) for source, target in mapping.items()
              if projection.value(source) is not None}
     if state.get('application_state') == 'submitted':

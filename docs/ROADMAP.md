@@ -1,61 +1,61 @@
 # Roadmap
 
-This is an honest status list, not a feature promise. The product goal is:
-**show a supported next action and the evidence that changed**, rather than
-maximize the number of collected listings.
+This is a status list, not a feature promise. The goal is to show a supported
+next action and the evidence that changed, within explicit collection and
+review budgets. Current operation does not depend on completing every item here.
 
 ## Where things stand
 
-| Iteration | Status |
-|---|---|
-| 1. Evidence integrity: native pay units, page-type gates, partial ATS retention, strict replay | Done |
-| 2. Run context and identity: immutable per-run context, profile/policy isolation, identity crosswalks | Done for runs; profile onboarding still manual |
-| 3. Outcomes and delivery: scoped outcome events, durable per-destination outbox | Outbox done and used in approved runs; outcome events are offline preview only |
-| 4. Local onboarding: profile wizard, data directory, `doctor`, backup/restore | Not started |
-| 5. Supervised validation: frozen cohorts, independent labels, precision/retention with denominators | Not started |
-| 6. Public release: owner-selected license, versioned release | Not started (no license yet) |
+| Area | Current behavior |
+| --- | --- |
+| Evidence and decisions | Native pay/geography, requirement scopes, source identity, page-type gates, exact roles and actor-scoped community threads |
+| Outcome review | Historical attempts, exact assessment revisions, buyer terms, work allocations and settlement facts; reviewed-file workflow only |
+| Delivery | Durable per-destination receipts in approved runs; compact handoff signals and reviewed mixed-draft reissue in disposable offline state |
+| Source expansion | Shared HTTP/logical budgets, cadence and adequately covered-check records; readers do not automatically admit new daily sources |
+| Local workflow | Named profiles, isolated data directories, `local doctor`, fictional demo, reviewed-file commands and closed-state backup/restore |
+| Security fixes | Verified SMTP/IMAP TLS, validated-IP public connections, proxy rejection and parent-bound hydration evidence |
+| Digest quality | Resource/roundup and hosted-copy exclusions, shared headline/compact floor, historical buyer demand and separate fit/role labels |
+| Public distribution | Current source, synthetic tests, neutral starter, separate fictional demo policies and publication checks; no license selected |
 
-## Known issues
+The implementation and focused tests for these areas are shipped. That is not
+a claim that the entire original specification or every provider-specific
+example is complete. See [the change summary](CHANGES.md) and
+[release verification](../RELEASE_CHECKS.md).
 
-- Some listing pages and freelancer profiles still reach Verify instead of
-  being rejected.
-- "X is necessary" is not yet read as a requirement; only required / must /
-  mandatory / minimum are.
-- Verify cards still print a developer "Ordering:" line.
-- Page fetching checks a destination's resolved address before the request
-  but does not pin that address for the connection, so DNS rebinding remains
-  theoretically possible (security review, 2026-09-28). Fix: connect to the
-  checked address.
-- Job text sent to the optional LLM scam check could try to influence its
-  verdict (prompt injection). The check only covers borderline cases and hard
-  filters still apply.
+## Finite remaining work
 
-## Next
+| Work | Completion condition |
+| --- | --- |
+| Remaining source-specific behavior | Engine-path fixtures and provenance for reminder/completion extraction, cross-capture buyer closure/edit history, payout feasibility, form segmentation, dated language conflicts, bounced contacts and forum competition |
+| Independent recommendation quality | Freeze at least 100 independently labeled records with 20 actionable positives; measure at least 95% Primary precision, 90% positive retention, zero known critical leaks and complete material-claim support |
+| Expanded source effectiveness | For each claimed source/route, report adequately covered bounded checks, unique actionable yield, duplicates, review effort and native costs; partial/failed retrieval remains missing coverage |
+| Live outcome integration | Review an authenticated outcome stream and channel mapping, then verify scoped transitions, uncertain receipt reconciliation and settlement evidence before enabling production use |
+| Interactive onboarding | A profile wizard that records supported operator facts rather than inventing qualifications |
+| Licensed/versioned distribution | Owner-selected license and an explicitly verified release artifact |
 
-1. Community buyer-thread adapters for public Discourse hiring categories (Make
-   community Hire Help, n8n community Jobs): the original poster is the buyer,
-   replies are mostly sellers, closure markers end the lead, reads are paced
-   and a 429 is recorded as missing coverage.
-2. Exact-role adapters for contractor platforms with explicit identity and
-   completeness checks; a JavaScript shell never counts as complete evidence.
-3. A compact-audit CLI export for the workbench.
-4. Onboarding: profile wizard, `doctor`, backup/restore.
+The first four rows do **not** block the existing daily digest. They limit which
+additional capabilities and quality claims are justified. The public starter
+still needs the user's own profile, source choices and provider configuration
+before live operation.
 
-## Branchable ideas
+## Known limits
 
-| Idea | Value | Small experiment and stop condition |
-|---|---|---|
-| `source-conformance-kit` | Reusable adapter contracts | Extract transport-independent fixtures and health semantics once a second consumer exists |
-| `pay-claims` | Inspectable compensation extraction | Curated currency/unit/qualifier corpus with spans and an abstention API; buyer budget, seller quote and accepted payment stay separate |
-| `source-yield-pilot` | New sources only when they add useful opportunities | One permitted source at a time, fixed request budget, overlap measured against existing routes |
-| `review-benchmark` | A defensible evaluation | Synthetic adversarial cases plus an independently labelled holdout, split by opportunity so copies never leak across sets |
-| `portable-review-ui` | Non-programmers inspect saved evidence | Keyboard navigation, screen-reader labels, import errors and large-file limits, tested across browsers; read-only |
+- Broad extraction rules can still miss formats and overclassify unfamiliar
+  pages. Regression tests are not a precision/recall measurement.
+- Reviewed-file outcome import is offline. It is not mailbox synchronization,
+  automatic applications or a live work/payment system.
+- Some adapter defaults assume India/INR; set yours explicitly.
+- Optional LLM scam checking still processes untrusted job text. Deterministic
+  gates remain authoritative; a model verdict does not prove safety.
+- Closed-state backups are verified byte copies, not online multi-database
+  transactions or signed archives. Keep profiles, reviews and backups private.
+- Current exact-role readers and source policies do not prove complete platform
+  coverage, provider access or successful payment.
 
 ## Measuring usefulness
 
-Track supported next actions per review session, repeated-blocked-item rate,
+Track supported next actions per review session, repeated blocked-item rate,
 critical false recommendations, loss of known positives, verification time and
 source coverage. Keep discovery, application, assessment, selection, allocation,
-accepted work and received payment as different events. The 95% Primary
-precision and 90% actionable retention figures are targets, not measurements:
-report denominators and uncertainty, and never evaluate only displayed items.
+accepted work and received payment as different events. Report denominators and
+uncertainty, and evaluate the full cohort rather than only displayed cards.

@@ -146,23 +146,25 @@ def _metadata(as_of: datetime | None = None) -> RunMetadata:
         now = now.replace(tzinfo=timezone.utc)
     v41_dir = Path(__file__).resolve().parent
     ruleset_hash = _combined_hash(sorted(v41_dir.glob("*.py")))
+    from ..versions import runtime_versions
+    versions = (json.loads(context.versions_json) if context else None) or runtime_versions()
     def policy_path(name: str) -> Path:
         path = _ROOT / name
         return path if path.exists() else path.with_name(path.stem + ".example.yaml")
 
-    profile_hash = _file_hash(policy_path("profile.yaml"))
-    trust_hash = _file_hash(_ROOT / "platform_registry.yaml")
-    config_hash = _file_hash(policy_path("config.yaml"))
-    if CONFIG.v55.enabled:
-        # Runtime review overrides are part of the policy, not invisible changes
-        # to a file-only hash. No environment variables or credentials are read.
-        config_hash = hashlib.sha256(json.dumps(CONFIG.model_dump(mode='json'), sort_keys=True, default=str).encode('utf-8')).hexdigest()[:16]
-    run_seed = f"{now.isoformat()}|{ruleset_hash}|{profile_hash}|{config_hash}"
     if context:
         profile_hash = hashlib.sha256(context.profile_json.encode()).hexdigest()[:16]
         trust_hash = hashlib.sha256(context.registry_json.encode()).hexdigest()[:16]
         config_hash = hashlib.sha256(context.config_json.encode()).hexdigest()[:16]
         run_seed = context.run_id + context.fingerprint() + ruleset_hash
+    else:
+        profile_hash = _file_hash(policy_path("profile.yaml"))
+        trust_hash = _file_hash(_ROOT / "platform_registry.yaml")
+        config_hash = _file_hash(policy_path("config.yaml"))
+        if CONFIG.v55.enabled:
+            config_hash = hashlib.sha256(json.dumps(CONFIG.model_dump(mode='json'), sort_keys=True, default=str).encode('utf-8')).hexdigest()[:16]
+        run_seed = f"{now.isoformat()}|{ruleset_hash}|{profile_hash}|{config_hash}"
+        run_seed += '|' + versions['code_sha256'] + '|' + versions['dependencies_sha256']
     run_id = hashlib.sha256(run_seed.encode("utf-8")).hexdigest()[:20]
     return RunMetadata(
         engine_version="v5.0.0-rc1" if CONFIG.v55.enabled else ENGINE_VERSION,
@@ -173,6 +175,7 @@ def _metadata(as_of: datetime | None = None) -> RunMetadata:
         profile_hash=profile_hash,
         trust_registry_hash=trust_hash,
         config_hash=config_hash,
+        runtime_versions=versions,
     )
 
 
@@ -293,8 +296,14 @@ def _match(
     assessment: Assessment,
 ) -> None:
     profile = default_profile()
-    sections = extract_sections(canonical.job.description)
+    sections = extract_sections(canonical.job.description,native_source=canonical.job.source if CONFIG.v55.enabled else None)
     concepts, concept_evidence = detect_concepts(canonical.job.title, sections, profile)
+    if CONFIG.v55.enabled and canonical.job.source == 'community_thread' and profile.role_concepts.get('workflow_automation'):
+        from .community import observation_thread, workflow_request
+        thread = next((t for o in canonical.observations if (t := observation_thread(o)) is not None and t.url == canonical.job.url), None)
+        if thread is not None and workflow_request(thread) and 'workflow_automation' not in concepts:
+            concepts.append('workflow_automation')
+            concept_evidence['workflow_automation'] = 'body:actor-scoped workflow repair or integration request'
     assessment.matched_concepts = concepts
     assessment.concept_evidence = concept_evidence
     assessment.role_families = list(concepts)
@@ -396,7 +405,7 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         reason for reason in eligibility_reasons
         if reason.startswith("credential_mismatch:")
     ]
-    sections = extract_sections(job.description)
+    sections = extract_sections(job.description,native_source=job.source if CONFIG.v55.enabled else None)
     requirements = sections.requirements
     credential_reasons = list(dict.fromkeys([
         *credential_reasons,
@@ -820,8 +829,19 @@ def _decision(canonical: CanonicalJob, assessment: Assessment) -> Decision:
             terminal_reason = reason
             break
 
+    from .work_actions import existing_work_action_allowed
+    existing_work = CONFIG.v55.enabled and existing_work_action_allowed(canonical, assessment)
+    if existing_work:
+        terminal_reason = ''
     if terminal_reason:
         action_band = ActionBand.REJECT
+        if CONFIG.v55.enabled:
+            # Later risk refinement can add a veto after normal assessment.
+            # Final actions and their evidence view must honor that veto too.
+            from .action_policy import finalize_rejected_action
+            from .evidence_dimensions import describe_evidence
+            finalize_rejected_action(assessment, canonical)
+            assessment.evidence_dimensions['readiness'] = describe_evidence(canonical, assessment)['readiness']
     else:
         direct_unknown_primary = (
             CONFIG.v41.allow_direct_unknown_primary
@@ -868,6 +888,9 @@ def _decision(canonical: CanonicalJob, assessment: Assessment) -> Decision:
         action_band = ActionBand.PRIMARY if ready else ActionBand.VERIFY
         terminal_reason = 'surface_primary' if ready else 'surface_verify'
 
+    from .work_actions import finalize_work_action_view
+    finalize_work_action_view(assessment)
+
     role_priority = _role_priority(assessment)
     language_edge = _explicit_profile_language_edge(assessment)
     accessibility_confidence = _accessibility_confidence(assessment)
@@ -883,7 +906,9 @@ def _decision(canonical: CanonicalJob, assessment: Assessment) -> Decision:
         and platform_record.onboarding_cost < 0.40
     ):
         risk_adjustment -= CONFIG.v41.high_onboarding_priority_penalty
+    from .action_constraints import priority_fields
     priority_key = PriorityKey(
+        **(priority_fields(canonical,assessment) if CONFIG.v55.enabled and action_band!=ActionBand.REJECT else {}),
         policy_version='v5.0.0-rc1' if CONFIG.v55.enabled else 'v4.2',
         action_readiness={'allocated': 3, 'captured_next_step': 3, 'application_ready': 2, 'verification_needed': 1}.get(assessment.action_readiness, 0),
         # Monotonic ordering encoding only, not a probability or earnings score.
@@ -1130,6 +1155,7 @@ async def refine_scam_with_llm(result: RunResult) -> int:
         item.decision = _decision(item.canonical, item.assessment)
         changed = True
     if changed:
+        result.evaluated.sort(key=_evaluation_sort_key)
         recount_result(result)
     return checked
 

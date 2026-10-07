@@ -123,6 +123,14 @@ def _write_audit(result, target: Path) -> Path:
         "observations": [sanitize_payload(row.model_dump(mode="json")) for row in result.observations],
         "decisions": [{
             "canonical_id": row.canonical.canonical_id,
+            **sanitize_payload({
+                "legacy_canonical_id": row.canonical.legacy_canonical_id,
+                "observation_ids": [o.observation_id for o in row.canonical.observations],
+                "field_sources": row.canonical.field_sources,
+                "alternate_urls": row.canonical.alternate_urls,
+                "canonicalization_reason": row.canonical.canonicalization_reason,
+                "outcome_binding_hold": row.canonical.outcome_binding_hold,
+            }),
             "job": sanitize_payload(row.job.model_dump(mode="json")),
             "assessment": sanitize_payload(row.assessment.model_dump(mode="json")),
             "decision": sanitize_payload(row.decision.model_dump(mode="json")),
@@ -164,6 +172,7 @@ async def capture_review(
     output_dir: Path | str, *, limit: int | None = None, source: str | None = None,
     transport=None, context: RunContext | None = None,
     request_limits: RequestLimits | None = None,
+    source_plan=None,
 ) -> tuple[Path, Path]:
     """Exclusive workspace; explicit context capability required for real HTTP."""
     target = _namespace(output_dir)
@@ -177,10 +186,11 @@ async def capture_review(
         try:
             limits = request_limits or RequestLimits(requests=config.v55.request_budget,
                                                      seconds=config.v55.time_budget_seconds)
-            budget = RunBudget(context, limits)
+            budget = RunBudget(context, limits, source_plan=source_plan)
             if transport is None and not context.network_allowed:
                 raise ValueError('live capture needs explicit network capability')
-            bounded = BoundedTransport(transport or httpx.AsyncHTTPTransport(retries=0), budget)
+            from ..public_http import PublicHTTPTransport
+            bounded = BoundedTransport(transport or PublicHTTPTransport(), budget)
             with run_scope(context):
                 return await _capture_review(target, limit=limit, source=source, transport=bounded)
         finally:

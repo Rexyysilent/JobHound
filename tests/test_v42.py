@@ -475,7 +475,7 @@ def test_adzuna_429_opens_run_circuit_breaker(monkeypatch):
 
     monkeypatch.setattr(
         "jobhound.v41.resolve.httpx.AsyncClient",
-        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+        lambda **kwargs: real_client(**dict(kwargs, transport=httpx.MockTransport(handler))),
     )
     asyncio.run(resolve_result_urls(result))
     errors = {
