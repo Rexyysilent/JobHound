@@ -1,6 +1,6 @@
 # Public source verification
 
-Prepared October 7, 2026 from the current cumulative implementation. This is a
+Prepared October 18, 2026 from the current cumulative implementation. This is a
 regression-verified development source update, not independent recommendation
 quality or a certification of all security properties.
 
@@ -43,9 +43,15 @@ quality or a certification of all security properties.
 
 ## Verification
 
-- Public-copy offline suite: **2,173 passed, 1 skipped**. The skipped test needs a
+- Public-copy offline suite: **2,180 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use
   synthetic policy, blank provider credentials and blocked external sockets.
+- Status presentation, transport, ranking breadth and handoff checks: **155
+  passed**, including seven status regressions. Parked updates are compact;
+  active cards and completed-step advice remain intact, and rendering does not
+  mutate frozen payloads. A private read-only replay preserved all 15 active
+  cards and coverage text while compacting five status updates. It made no
+  provider calls or production database writes; captured content is not published.
 - Focused public initialization/recovery and publication controls: **60 passed**,
   including qualification-free startup, cross-profile isolation, closed backup
   recovery and the new private workspace-path exclusions.

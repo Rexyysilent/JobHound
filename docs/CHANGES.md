@@ -1,10 +1,15 @@
 # Current implementation changes
 
-Updated October 7, 2026. This public snapshot includes the cumulative reviewed
+Updated October 18, 2026. This public snapshot includes the cumulative reviewed
 implementation work and subsequent security/digest fixes. Private handoff
 archives, captured job text and runtime receipts are not distributed.
 
 ## Evidence and action correctness
+
+- Job status updates render compact lifecycle labels, reasons and safe next
+  steps. Exhausted verification leads no longer appear as full Verify cards.
+  Active cards, completed-step waiting advice and immutable delivery history
+  retain their existing behavior; ranking and card limits are unchanged.
 
 - Requirement-local skill/years/modality extraction; employer addresses and
   pronouns do not become applicant residency restrictions.

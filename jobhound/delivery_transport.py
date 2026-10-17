@@ -87,6 +87,27 @@ def _subject_line(card_count, status_count, now):
     return f"JobHound — source updates only, {day}"
 
 
+def _job_status_entry(item):
+    """Present a parked/closed revision without advertising it as a new action."""
+    from .v41.provenance import public_url
+    decision, assessment = item.decision, item.assessment
+    reason = assessment.lifecycle_reason or decision.terminal_reason or decision.lifecycle
+    label = ('CLOSED' if decision.lifecycle == 'closed'
+             else 'SKIP' if decision.action_band.value == 'reject'
+             else 'HISTORICAL LEAD' if reason == 'historical_buyer_request'
+             else 'WATCH')
+    next_step = decision.next_step
+    if decision.next_action in {'apply', 'verify'} or not next_step:
+        next_step = ('Await new evidence before reconsidering this lead.' if label in {'WATCH', 'HISTORICAL LEAD'}
+                     else 'Do not act on this record unless the blocking evidence changes.')
+    return '\n'.join([
+        f"• {label} | {item.job.title} | {item.job.company or 'Employer unverified'}",
+        f"  Status: {reason.replace('_', ' ')}.",
+        f"  Next: {next_step}",
+        f"  {public_url(item.job.url)}",
+    ])
+
+
 def render_envelope(rows, *, now=None):
     """Reuse the release card renderer, not a new scoring/filtering policy."""
     from .models import Job
@@ -132,7 +153,7 @@ def render_envelope(rows, *, now=None):
                    else 'Status updates' if decision.lifecycle != 'active' or decision.action_band.value == 'reject'
                    else 'Apply / act first' if decision.action_band.value == 'primary'
                    else 'Worth a bounded check')
-        entry = _release_entry(item)
+        entry = _job_status_entry(item) if section == 'Status updates' and not handoff else _release_entry(item)
         if payload.get('kind') == 'handoff_card' and decision.next_action == 'start_allocated_task':
             plan = item.assessment.account_state.get('_reviewed_work_action') or {}
             terms = plan.get('terms')
