@@ -113,6 +113,11 @@ inspection cost and adequately covered checks before expanding a source.
 
 ### v5.7 outcomes: remember what actually happened
 
+Delivered job status updates use compact Watch, Historical Lead, Closed or Skip
+entries with the reason and next step. Parked leads no longer look like fresh
+Verify cards. Active cards retain their full detail, and status updates do not
+count toward the subject's job-card total. Previously accepted emails stay frozen.
+
 A job listing is only the first step. v5.7 adds scoped outcome facts:
 applications, assessments, rejections, buyer replies and access changes.
 
