@@ -1,0 +1,202 @@
+{
+  "observation_id": "community:0b451c1a78f446be6d683961",
+  "source": "community_thread",
+  "raw_payload": {
+    "community_pages": [
+      {
+        "id": 123,
+        "title": "WhatsApp workflow repair developer wanted",
+        "archetype": "regular",
+        "category_id": 74,
+        "post_stream": {
+          "stream": [
+            1,
+            2
+          ],
+          "posts": [
+            {
+              "id": 1,
+              "post_number": 1,
+              "user_id": 10,
+              "topic_id": 123,
+              "post_type": 1,
+              "cooked": "<p>I need a developer to repair a WhatsApp and Google Sheets workflow. Requirements: Remote applicants in India may apply. No degree or prior years of experience required.</p>",
+              "created_at": "2026-08-04T00:00:00+00:00",
+              "updated_at": "2026-08-04T00:00:00+00:00",
+              "hidden": false,
+              "wiki": false
+            },
+            {
+              "id": 2,
+              "post_number": 2,
+              "user_id": 10,
+              "topic_id": 123,
+              "post_type": 1,
+              "cooked": "<p>Thanks for your help!</p>",
+              "created_at": "2026-10-01T23:00:00+00:00",
+              "updated_at": "2026-10-01T23:00:00+00:00",
+              "hidden": false,
+              "wiki": false
+            }
+          ]
+        },
+        "closed": false
+      }
+    ],
+    "community_selected_post_id": null,
+    "community_thread": {
+      "schema_version": "community-thread/v2",
+      "topic_id": 123,
+      "url": "https://community.make.com/t/123",
+      "title": "WhatsApp workflow repair developer wanted",
+      "topic_title": "WhatsApp workflow repair developer wanted",
+      "selected_post_id": 1,
+      "buyer_actor_id": 10,
+      "original_at": "2026-08-04T00:00:00Z",
+      "last_substantive_buyer_at": "2026-08-04T00:00:00Z",
+      "observed_at": "2026-10-02T00:00:00Z",
+      "posts": [
+        {
+          "post_id": 1,
+          "post_number": 1,
+          "actor_id": 10,
+          "actor_role": "topic_author",
+          "created_at": "2026-08-04T00:00:00Z",
+          "edited_at": "2026-08-04T00:00:00Z",
+          "text": "I need a developer to repair a WhatsApp and Google Sheets workflow. Requirements: Remote applicants in India may apply. No degree or prior years of experience required.",
+          "quotes": [],
+          "cooked_sha256": "03d8c71d0705811f3e44a001bf83a16bec526c6aa91e79dddd7fd1f85fbb981e",
+          "reply_to_post_number": null,
+          "status_signal": "unknown"
+        },
+        {
+          "post_id": 2,
+          "post_number": 2,
+          "actor_id": 10,
+          "actor_role": "topic_author",
+          "created_at": "2026-10-01T23:00:00Z",
+          "edited_at": "2026-10-01T23:00:00Z",
+          "text": "Thanks for your help!",
+          "quotes": [],
+          "cooked_sha256": "ee2faa070cafb003126885340708f4c1e859bd552d8ecbbfc05c6a8df6552350",
+          "reply_to_post_number": null,
+          "status_signal": "unknown"
+        }
+      ],
+      "selected_post_ids": [
+        1,
+        2
+      ],
+      "expected_post_ids": [
+        1,
+        2
+      ],
+      "complete": true,
+      "document_type": "buyer_request",
+      "intent": "buyer",
+      "description": "I need a developer to repair a WhatsApp and Google Sheets workflow. Requirements: Remote applicants in India may apply. No degree or prior years of experience required.\nThanks for your help!",
+      "vacancy_state": "unknown",
+      "closure_post_id": null,
+      "thread_locked": false,
+      "issues": [],
+      "caveats": [],
+      "payload_sha256": "a81c9f02f8ad4d11a2755159ba2ce86ec1030cc3bb83069ee7591845ab5d9945",
+      "revisions": [
+        {
+          "revision_id": "75d187b2234fb68e9dde16b5e6820ea1c377e6a53f6300d534b11d1a2d501f61",
+          "post_id": 1,
+          "actor_id": 10,
+          "kind": "original",
+          "created_at": "2026-08-04T00:00:00Z",
+          "edited_at": "2026-08-04T00:00:00Z",
+          "material_text_sha256": "a3432bff04b43ad24f15ad9cac1f44f9a1bf33f846cfb4437fe4e71cb6fa8c4e",
+          "supersedes": [],
+          "edit_history_available": false
+        }
+      ],
+      "current_terms_post_ids": [
+        1,
+        2
+      ],
+      "current_terms_revision_id": "75d187b2234fb68e9dde16b5e6820ea1c377e6a53f6300d534b11d1a2d501f61",
+      "terms_state": "original"
+    },
+    "community_coverage": {
+      "fetched_posts": 2,
+      "expected_posts": 2,
+      "saved_pages": 1
+    }
+  },
+  "job": {
+    "id": "",
+    "source": "community_thread",
+    "seen_on": [],
+    "title": "WhatsApp workflow repair developer wanted",
+    "company": "Community requester 10",
+    "company_domain": null,
+    "company_confidence": 0.0,
+    "url": "https://community.make.com/t/123",
+    "original_title": null,
+    "title_truncated": false,
+    "title_reconstructed": false,
+    "description": "I need a developer to repair a WhatsApp and Google Sheets workflow. Requirements: Remote applicants in India may apply. No degree or prior years of experience required.\nThanks for your help!",
+    "location": null,
+    "is_remote": true,
+    "region_tags": [],
+    "posted_at": "2026-08-04T00:00:00Z",
+    "pay_raw": null,
+    "pay_min_hourly_usd": null,
+    "pay_max_hourly_usd": null,
+    "pay_basis": null,
+    "pay_is_estimate": false,
+    "guaranteed_hours": false,
+    "pay_source": "unknown",
+    "platform_key": null,
+    "platform_trust": null,
+    "effective_hourly_usd": null,
+    "scam_score": 0.0,
+    "scam_flags": [],
+    "llm_pending": false,
+    "pay_ok": null,
+    "fit_score": 0.0,
+    "fit_reasons": [],
+    "easy_entry": false,
+    "listing_confidence": 0.5,
+    "ev_score": 0.0,
+    "verdict": "pending"
+  },
+  "publisher_domain": "community.make.com",
+  "apply_domain": "",
+  "original_url": "https://community.make.com/t/123",
+  "normalized_url": "https://community.make.com/t/123",
+  "source_kind": "original_employer",
+  "source_confidence": 0.9,
+  "normalization_error": null,
+  "repair_flags": [],
+  "redirect_trail": [],
+  "hydrated_source": null,
+  "resolution_attempted": false,
+  "resolution_error": null,
+  "origin": "hydration",
+  "parent_observation_ids": [],
+  "captured_at": "2026-10-02T00:00:00Z",
+  "content_hash": "a81c9f02f8ad4d11a2755159ba2ce86ec1030cc3bb83069ee7591845ab5d9945",
+  "resolution_state": "not_needed",
+  "content_state": "complete",
+  "identity_state": "exact",
+  "application_route_state": "account_unknown",
+  "vacancy_state": "unknown",
+  "task_availability_state": "unknown",
+  "retrieval_error": null,
+  "truncated": false,
+  "verified_open_at": null,
+  "extraction_version": "community-thread/v2",
+  "evidence_projection_version": "",
+  "work_arrangement": {
+    "state": "unknown",
+    "value": null,
+    "claims": [],
+    "observation_ids": [],
+    "caveats": []
+  }
+}

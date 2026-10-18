@@ -152,6 +152,18 @@ def _specialist_domain(
     folded = normalize_match(title).casefold()
     if not _SPECIALIST_NOUN.search(folded):
         return None, "none"
+    # An explicit expert occupation names a narrower capability than the
+    # profile's broad "data" or "programming" lane. AI-evaluation wording
+    # does not turn those expert requirements into generalist work.
+    if re.search(r'\b(?:expert|specialist)\b', folded):
+        for domain, pattern in (
+            ('data_science', r'\bdata[ -]science\b'),
+            ('competitive_programming', r'\bcompetitive[ -]programming\b'),
+        ):
+            if re.search(pattern, folded):
+                exact = {domain, domain.replace('_', ' ')}
+                status = 'claimed' if exact & profile.claimed_domains() else 'unclaimed'
+                return domain, status
     if any(_phrase_in_title(language, folded) for language in profile.known_languages):
         if re.search(
             r"\b(?:language|linguist|translator|translation|ai|llm|"

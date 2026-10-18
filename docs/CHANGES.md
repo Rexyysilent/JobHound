@@ -1,5 +1,12 @@
 # Current implementation changes
 
+- Exclude explicitly delimited plain/visible application forms; retain genuine
+  role tails and hold uncertain boundaries.
+- Enforce explicit onsite obligations and exact expert domains without rejecting
+  supported remote alternatives or generalist work.
+- Keep buyer acknowledgments out of action-change fingerprints, with proven
+  destination-specific adoption of old delivery material and archived-thread compatibility.
+
 Updated October 18, 2026. This public snapshot includes the cumulative reviewed
 implementation work and subsequent security/digest fixes. Private handoff
 archives, captured job text and runtime receipts are not distributed.

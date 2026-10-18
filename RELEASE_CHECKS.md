@@ -43,10 +43,14 @@ quality or a certification of all security properties.
 
 ## Verification
 
-- Public-copy offline suite: **2,353 passed, 1 skipped**. The skipped test needs a
+- Public-copy offline suite: **2,422 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use
   synthetic policy, blank provider credentials and blocked external sockets.
-- The next bounded batch adds **80** native compensation, equipment and exact-role
+- The current native-boundary batch adds **69** controls for plain/visible form
+  exclusion, explicit onsite and specialist requirements, cross-capture buyer
+  history, and proof-gated delivery material v2-to-v3 adoption. Saved native
+  thread v2 evidence remains compatible. All 69 run through the combined suite.
+- The earlier boundary batch adds **80** native compensation, equipment and exact-role
   controls. They cover audio-hour units, separately attributed vendor/approval/
   payment conditions, dated webcam facts, action-specific prerequisites and
   exact-URL selection on multi-posting pages. Parent review includes shared

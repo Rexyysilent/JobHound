@@ -26,7 +26,7 @@ import httpx
 
 from ..models import Job
 from ..normalize import company_from_job_url, normalize, _parse_dt, _description
-from ..document_regions import role_markup
+from ..document_regions import role_markup, PlainFormBoundaryError
 from ..text import html_to_text
 from .models import ListingObservation, SourceKind
 from .provenance import sanitize_payload, sanitize_url
@@ -679,6 +679,9 @@ async def hydrate_public_posting(
             response, source=source, public=public, request_url=request_url,
             posting_id=posting_id, seg=seg, final_url=final_url,
             original=original, cached_at=cached_at if cached else None, cached=bool(cached))
+    except PlainFormBoundaryError as exc:
+        outcome = HydrationResult(state='partial', source=source,
+                                  request_url=request_url, public_url=public, error=str(exc))
     except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
         outcome = HydrationResult(state='failed', source=source,
                                   request_url=request_url, public_url=public,
