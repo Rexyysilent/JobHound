@@ -43,15 +43,15 @@ quality or a certification of all security properties.
 
 ## Verification
 
-- Public-copy offline suite: **2,336 passed, 1 skipped**. The skipped test needs a
+- Public-copy offline suite: **2,353 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use
   synthetic policy, blank provider credentials and blocked external sockets.
-- The next bounded batch adds **63** native compensation, equipment and exact-role
+- The next bounded batch adds **80** native compensation, equipment and exact-role
   controls. They cover audio-hour units, separately attributed vendor/approval/
   payment conditions, dated webcam facts, action-specific prerequisites and
   exact-URL selection on multi-posting pages. Parent review includes shared
   optional modifiers, supported webcam alternatives and completed-work controls.
-  Final agent focused runs passed 167 compensation-adjacent, 30 equipment and
+  Final agent focused runs passed 184 compensation-adjacent, 30 equipment and
   177 role-boundary-adjacent tests; these overlap with the full suite.
 - The earlier October 18 batch added 93 payout, dated-language and outbound-event
   cases. Bounded agent suites passed 276, 62 and 258 tests respectively; these

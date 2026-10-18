@@ -1031,6 +1031,25 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
     return candidates, selected, conflict
 
 
+_CONDITION_DURATION = r'(?:\d+(?:\.\d+)?)\s+(?:(?:business|working)\s+)?(?:hours?|minutes?|days?|weeks?|months?)\b'
+
+
+def _settlement_timing(literal):
+    """A financial subject plus a duration/settlement trigger, never paid leave."""
+    subject = re.search(
+        r'\b(?:payments?|payouts?)\s+(?:(?:is|are|will\s+be|may\s+be)\s+)?'
+        r'(?:(?:made|issued|processed|released|sent|due)\s+)?'
+        rf'(?=(?:after|following|within)\b|{_CONDITION_DURATION})|'
+        r'\b(?:you|workers?|contractors?|participants?)\s+(?:will\s+be|are|may\s+be)\s+paid\s+',
+        literal, re.I)
+    if subject is None:
+        return False
+    return bool(re.search(
+        rf'\b(?:within|after|following)\s+(?:{_CONDITION_DURATION}|'
+        r'(?:the\s+)?(?:approval|submission|acceptance|completion|invoice(?:\s+approval)?)\b)',
+        literal[subject.end():], re.I))
+
+
 def compensation_conditions(canonical, assessment):
     """Retain literal vendor pace and settlement conditions; never compute wages."""
     selected = assessment.selected_pay
@@ -1048,11 +1067,16 @@ def compensation_conditions(canonical, assessment):
             continue
         # The timed subject owns the claim: payment after approval is not the
         # approval's duration, and vendor approval estimates are not work pace.
-        if re.search(r'\b(?:payment|paid|payout)\b.{0,70}\b(?:after|following|within)\b', literal, re.I):
+        if _settlement_timing(literal):
             code = 'payment_schedule'
         elif re.search(r'\b(?:compensation|pay|payment)\b.{0,60}\b(?:subject to|based on|requires?)\s+approval\b', literal, re.I):
             code = 'approval_condition'
-        elif re.search(r'\b(?:approval|review)\b.{0,45}\b(?:takes?|hours?|minutes?|days?|weeks?|within)\b', literal, re.I):
+        elif re.search(
+                r'\b(?:approval(?:\s+review)?|(?:submission|submitted\s+work|acceptance|quality(?:\s+approval)?)\s+review|'
+                r'review\s+(?:of|for)\s+(?:submitted\s+work|submission|acceptance|quality\s+approval))'
+                r'(?:\s+process(?:ing)?)?\s+(?:(?:may|can|will)\s+)?'
+                r'(?:(?:takes?|lasts?|requires?)\s+|(?:is|occurs?)\s+within\s+|within\s+)'
+                rf'(?:(?:up\s+to|about|approximately)\s+)?{_CONDITION_DURATION}', literal, re.I):
             code = 'approval_processing'
         elif (re.search(r'\b(?:vendor|provider|publisher)\b.{0,35}\b(?:estimat\w*|expects?|throughput)\b', literal, re.I)
                 and re.search(r'\b(?:hours?|minutes?|throughput)\b', literal, re.I)

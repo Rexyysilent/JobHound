@@ -137,7 +137,7 @@ def test_non_hour_audio_counts_are_not_silently_renormalized():
 
 @pytest.mark.parametrize('condition,expected', [
     ('Vendor estimates approval takes 3 hours.', 'approval_processing'),
-    ('Vendor estimates review takes 3 hours.', 'approval_processing'),
+    ('Vendor estimates approval review takes 3 hours.', 'approval_processing'),
     ('Payment is made after approval within 30 days.', 'payment_schedule'),
 ])
 def test_timing_subject_keeps_work_estimate_approval_review_and_payment_separate(condition, expected):
@@ -167,3 +167,38 @@ def test_long_repeated_conditions_bound_digest_without_losing_audit_evidence():
     assert long not in text and text.count('Payment is made 30 days after approval.') == 1
     assert 'full condition evidence retained in audit' in text
     assert len(text) < 6000
+
+
+@pytest.mark.parametrize('condition', [
+    'Paid sabbatical after four years of service.',
+    'Paid sick days after the first 90 days.',
+    'Paid parental leave after six months.',
+    'Manage paid media integration within social campaigns.',
+    'Provide stress sign-off approval within a configuration-controlled environment.',
+    'Review PRs, debug production issues, and take meaningful work.',
+    'Review and challenge work, and take testing seriously.',
+    'Code review takes 30 minutes.',
+    'Vendor estimates review takes 3 hours.',
+])
+def test_generic_benefit_or_job_duty_is_not_financial_settlement_timing(condition):
+    result, item, _ = native('USD 18 fixed project', condition)
+    assert not any(e.dimension == 'compensation_conditions' for e in item.assessment.evidence)
+    text = build_digest(result, include_all=True).text
+    assert 'payment schedule claim' not in text and 'approval/review processing claim' not in text
+
+
+@pytest.mark.parametrize('condition,code', [
+    ('Vendor estimates approval takes 3 hours.', 'approval_processing'),
+    ('Vendor estimates approval review takes 3 hours.', 'approval_processing'),
+    ('Submission review may take 2 days.', 'approval_processing'),
+    ('Review of submitted work takes 3 hours.', 'approval_processing'),
+    ('Approval may take 7 days.', 'approval_processing'),
+    ('Payment is made after approval within 30 days.', 'payment_schedule'),
+    ('You will be paid within 14 days.', 'payment_schedule'),
+    ('Payment after approval.', 'payment_schedule'),
+])
+def test_actual_compensation_payment_trigger_and_duration_are_retained(condition, code):
+    _, item, _ = native('USD 18 fixed project', condition)
+    assert [(e.code, e.span) for e in item.assessment.evidence
+            if e.dimension == 'compensation_conditions'] == [(code, condition)]
+    assert item.assessment.time_to_cash_days is None
