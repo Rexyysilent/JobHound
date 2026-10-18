@@ -124,6 +124,13 @@ def describe_evidence(canonical, assessment):
             value={'blockers': eligibility_blocks, 'unresolved': eligibility_unknowns},
             claims=[e for e in assessment.evidence if e.dimension in {'language', 'experience', 'degree', 'domain', 'tool', 'location'}],
             observation_ids=ids, caveats=['Does not establish selection, account access or task allocation.']),
+        'equipment': EvidenceDimension(
+            state=('unknown' if any(fact['state'] in {'unmet', 'unknown', 'conflict'}
+                for fact in assessment.requirements_assessment.equipment_compatibility) else
+                'observed' if assessment.requirements_assessment.equipment_compatibility else 'not_stated'),
+            value=assessment.requirements_assessment.equipment_compatibility,
+            observation_ids=[fact['observation_id'] for fact in assessment.requirements_assessment.equipment_compatibility],
+            caveats=['Inventory compatibility is separate from account status and assessment approval.']),
         'work_arrangement': best.work_arrangement,
         'economics': EvidenceDimension(state=economics,
             value=pay.model_dump(mode='json') if pay else None,

@@ -211,6 +211,8 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     if not route:
         _task(assessment, canonical, 'application_route', 'Locate the individual role application/contact path, not a board index or company home page.', now, 'automatic_adapter', attempts)
     for unresolved in assessment.unresolved:
+        if unresolved.startswith('equipment_compatibility:'):
+            _task(assessment, canonical, unresolved, 'Confirm the required webcam is available and accepted for this role using explicit current equipment evidence; owning a phone does not establish compatibility.', now)
         if unresolved.startswith('language_unverified:'):
             _task(assessment, canonical, unresolved, 'Confirm the required language modality and level against the original role, then obtain a dated explicit profile declaration resolving the proficiency or task-preference uncertainty.', now)
         if unresolved.startswith(('credential_unverified:', 'requirement_unverified:', 'experience_unverified:', 'specialist_', 'location_scope_', 'pay_conflict', 'title_truncated', 'company_identity_')):
@@ -467,6 +469,10 @@ def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessmen
             t['missing_fact'] not in {'current_open_status', 'application_route'}]
         return
     if step_value('assessment_state') == 'invited':
+        for fact in assessment.requirements_assessment.equipment_compatibility:
+            if fact['scope'] == 'assessment' and fact['modality'] == 'required' and fact['state'] in {'unmet', 'unknown', 'conflict'}:
+                _task(assessment, canonical, f'equipment_compatibility:webcam:{fact["state"]}',
+                    'Confirm an available webcam accepted for this exact assessment; generic equipment approval and phone ownership do not establish webcam compatibility.', now)
         checks = step_value('action_checks')
         ready_checks = isinstance(checks, ActionChecks) and all(
             getattr(checks, k) is True for k in ('privacy', 'schedule', 'equipment', 'cost'))

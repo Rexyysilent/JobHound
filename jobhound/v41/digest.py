@@ -188,6 +188,27 @@ def _pay_line(item: EvaluatedJob) -> str:
             caveat += '; conflicting pay claims: verify before committing'
         if selected.parse_warnings:
             caveat += '; parsing caveats: ' + ', '.join(selected.parse_warnings)
+        labels = {'vendor_work_estimate': 'vendor work estimate (not a guaranteed pace)',
+                  'approval_processing': 'approval/review processing claim',
+                  'approval_condition': 'compensation approval condition',
+                  'payment_schedule': 'payment schedule claim (trigger retained)'}
+        conditions = [e for e in getattr(item.assessment, 'evidence', [])
+                      if e.dimension == 'compensation_conditions' and e.code in labels]
+        seen = set()
+        shortened = False
+        for evidence in conditions:
+            key = (evidence.code, evidence.span)
+            if key in seen or len(seen) >= 6:
+                shortened = True
+                continue
+            seen.add(key)
+            span = ' '.join(evidence.span.split())
+            if len(span) > 220:
+                span = span[:220] + '…'
+                shortened = True
+            caveat += f'; {labels[evidence.code]}: "{span}"'
+        if shortened:
+            caveat += '; full condition evidence retained in audit (excerpts shortened or repeated/additional claims omitted)'
         return f'{claim} ({basis}; {support}){caveat}'
     source_kind = (
         selected.observation_source_kind.value

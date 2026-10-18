@@ -6,6 +6,16 @@ archives, captured job text and runtime receipts are not distributed.
 
 ## Evidence and action correctness
 
+- Exact 60-audio-minute compensation retains its output unit. Vendor work pace,
+  approval processing and payment-delay claims remain separately attributed;
+  bounded digest excerpts do not invent hourly earnings or first-payment dates.
+- Optional dated equipment declarations keep webcam compatibility explicit.
+  Phones are not presumed webcams; required, preferred and assessment-only
+  demands retain separate action consequences and completed-work bookkeeping.
+- Multi-posting JSON-LD pages require one unambiguous exact-URL role. Sibling
+  degrees and campaign pay cannot supply the requested leaf's evidence.
+  See [the behavior and configuration guide](handoff_boundaries.md).
+
 - Explicit payout minima are compared with the exact fixed amount from the same
   compensation observation. Fee tiers are not minima, hypothetical aggregation
   is not a balance, and an allocated-work plan cannot bypass the amount check.

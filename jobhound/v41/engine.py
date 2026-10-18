@@ -385,6 +385,15 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
 
     requirements_assessment = assess_requirements(canonical, profile)
     assessment.requirements_assessment = requirements_assessment
+    if CONFIG.v55.enabled:
+        from .equipment import assess_equipment
+        requirements_assessment.equipment_compatibility = assess_equipment(canonical, profile, as_of)
+        assessment.unresolved.extend(
+            f'equipment_compatibility:webcam:{fact["state"]}'
+            for fact in requirements_assessment.equipment_compatibility
+            if fact['scope'] == 'role' and fact['modality'] == 'required'
+            and fact['state'] in {'unmet', 'unknown', 'conflict'}
+        )
     # Some aggregators concatenate a US state name with the ISO country code
     # ``IN`` (India), while their retained URL identifies a US city/state.  A
     # URL slug is not applicant eligibility evidence; retain the contradiction
@@ -727,6 +736,8 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         ))
     _sync_pay_assessment(assessment)
     if CONFIG.v55.enabled:
+        from .extract import compensation_conditions
+        assessment.evidence.extend(compensation_conditions(canonical, assessment))
         from .action_policy import apply_action_policy
         if canonical.best_observation.work_arrangement.state == 'conflicting':
             assessment.unresolved.append('location_scope_conflict:work_arrangement')

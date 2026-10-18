@@ -11,7 +11,7 @@ from ..enrich.pay import parse_pay, parse_title_pay
 from ..filters.eligibility import Profile
 from ..filters.matching import phrase_in_text
 from ..text import normalize_match, fold_dashes
-from .models import CanonicalJob, PayCandidate, SourceKind
+from .models import CanonicalJob, PayCandidate, SourceKind, Evidence
 from .compensation import parse_compensation, money_expression_spans
 from .compensation_legacy import parse_compensation as parse_compensation_legacy
 
@@ -1029,6 +1029,73 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
         conflict |= len(output) > 1
         conflict |= any(c.parse_warnings and c.amount_low is None for c in strong)
     return candidates, selected, conflict
+
+
+_CONDITION_DURATION = r'(?:\d+(?:\.\d+)?)\s+(?:(?:business|working)\s+)?(?:hours?|minutes?|days?|weeks?|months?)\b'
+
+
+def _settlement_timing(literal):
+    """A financial subject plus a duration/settlement trigger, never paid leave."""
+    subject = re.search(
+        r'\b(?:payments?|payouts?)\s+(?:(?:is|are|will\s+be|may\s+be)\s+)?'
+        r'(?:(?:made|issued|processed|released|sent|due)\s+)?'
+        rf'(?=(?:after|following|within)\b|{_CONDITION_DURATION})|'
+        r'\b(?:you|workers?|contractors?|participants?)\s+(?:will\s+be|are|may\s+be)\s+paid\s+',
+        literal, re.I)
+    if subject is None:
+        return False
+    return bool(re.search(
+        rf'\b(?:within|after|following)\s+(?:{_CONDITION_DURATION}|'
+        r'(?:the\s+)?(?:approval|submission|acceptance|completion|invoice(?:\s+approval)?)\b)',
+        literal[subject.end():], re.I))
+
+
+def compensation_conditions(canonical, assessment):
+    """Retain literal vendor pace and settlement conditions; never compute wages."""
+    selected = assessment.selected_pay
+    if selected is None:
+        return []
+    observation = next((o for o in canonical.observations if o.observation_id == selected.observation_id), None)
+    if observation is None or observation.job is None:
+        return []
+    text = observation.job.description
+    claims = []
+    work_estimates = set()
+    for match in re.finditer(r'[^;!?\n]+?(?:\.(?=\s|$)|[;!?\n]|$)', text):
+        literal = match.group().strip()
+        if not literal or re.search(r'\b(?:other|another|different|historical)\s+(?:role|project|assignment)\b|\b(?:corporate|company-wide|platform-wide)\b', literal, re.I):
+            continue
+        # The timed subject owns the claim: payment after approval is not the
+        # approval's duration, and vendor approval estimates are not work pace.
+        if _settlement_timing(literal):
+            code = 'payment_schedule'
+        elif re.search(r'\b(?:compensation|pay|payment)\b.{0,60}\b(?:subject to|based on|requires?)\s+approval\b', literal, re.I):
+            code = 'approval_condition'
+        elif re.search(
+                r'\b(?:approval(?:\s+review)?|(?:submission|submitted\s+work|acceptance|quality(?:\s+approval)?)\s+review|'
+                r'review\s+(?:of|for)\s+(?:submitted\s+work|submission|acceptance|quality\s+approval))'
+                r'(?:\s+process(?:ing)?)?\s+(?:(?:may|can|will)\s+)?'
+                r'(?:(?:takes?|lasts?|requires?)\s+|(?:is|occurs?)\s+within\s+|within\s+)'
+                rf'(?:(?:up\s+to|about|approximately)\s+)?{_CONDITION_DURATION}', literal, re.I):
+            code = 'approval_processing'
+        elif (re.search(r'\b(?:vendor|provider|publisher)\b.{0,35}\b(?:estimat\w*|expects?|throughput)\b', literal, re.I)
+                and re.search(r'\b(?:hours?|minutes?|throughput)\b', literal, re.I)
+                and re.search(r'\b(?:work|tasks?|production|throughput|transcrib\w*|annotat\w*)\b', literal, re.I)
+                and not re.search(r'\b(?:approval|payment|payout)\b', literal, re.I)):
+            code = 'vendor_work_estimate'
+            work_estimates.add(literal)
+        else:
+            continue
+        start = match.start() + len(match.group()) - len(match.group().lstrip())
+        claims.append(Evidence(dimension='compensation_conditions', code=code,
+            value=dict(source_span_start=start, source_span_end=start+len(literal),
+                       source_text_sha256=hashlib.sha256(text.encode()).hexdigest()),
+            observation_id=observation.observation_id, source_field='description', span=literal,
+            source_kind=observation.source_kind,
+            modality='publisher_estimate' if code == 'vendor_work_estimate' else 'explicit'))
+    # Multiple distinct statements remain evidence; no arbitrary last-wins pace.
+    selected.labor_time_assumption = next(iter(work_estimates)) if len(work_estimates) == 1 else None
+    return claims
 
 
 def detect_concepts(

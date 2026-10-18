@@ -117,7 +117,7 @@ _CODES = re.compile(r"\b(?:USD|INR|EUR|GBP|CAD|AUD)\b", re.I)
 _UNIT = re.compile(
     r"^\s*(?:(?:gross|net|base|brut|bruts|nette?|nettes?)\s+)?(?:"
     r"(?P<french>par\s+(?:heure|mois|an|année|jour|semaine)|annuels?|annuelles?|mensuels?|mensuelles?|horaires?)|"
-    r"(?P<audio>per\s+(?:accepted\s+|paid\s+)?(?:recorded|audio|finished|transcribed)\s+(?:audio\s+)?(?:hours?|minutes?))|"
+    r"(?P<audio>per\s+(?:60\s+(?:recorded\s+)?audio\s+minutes?|(?:accepted\s+|paid\s+)?(?:recorded|audio|finished|transcribed)\s+(?:audio\s+)?(?:hours?|minutes?)))|"
     r"(?P<taskhour>per\s+(?:paid\s+)?task[- ]?hours?)|"
     r"(?P<item>per\s+(?:accepted\s+)?(?:task|item|response|image|word)|/\s*(?:task|item|response|image|word))|"
     r"(?P<fixed>fixed(?:[- ]price|\s+project)?|for\s+the\s+(?:whole\s+)?project|project\s+budget)|"
@@ -236,7 +236,8 @@ def parse_compensation(raw: str, *, labor_hours_per_unit: float | None = None) -
         if unit["french"]:
             adjacent = _unit_name(unit["french"])
         elif unit["audio"]:
-            adjacent = "output_audio_minute" if "minute" in unit["audio"].casefold() else "output_audio_hour"
+            adjacent = ("output_audio_hour" if re.match(r'per\s+60\b', unit['audio'], re.I)
+                        else "output_audio_minute" if "minute" in unit["audio"].casefold() else "output_audio_hour")
         elif unit["taskhour"]:
             adjacent = "task_hour"
         elif unit["item"]:
