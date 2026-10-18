@@ -6,6 +6,16 @@ archives, captured job text and runtime receipts are not distributed.
 
 ## Evidence and action correctness
 
+- Explicit payout minima are compared with the exact fixed amount from the same
+  compensation observation. Fee tiers are not minima, hypothetical aggregation
+  is not a balance, and an allocated-work plan cannot bypass the amount check.
+- Optional dated language declarations distinguish spoken/written capability
+  and task preferences. Conflicts remain checks; profile evidence survives
+  immutable context capture and is rebuilt when an assessment is reused.
+- Reviewed outbound observations retain bounce and alternate-message history
+  without establishing buyer replies, conversion or contact verification.
+  Record-only events leave action material and delivery revision selection intact.
+
 - Job status updates render compact lifecycle labels, reasons and safe next
   steps. Exhausted verification leads no longer appear as full Verify cards.
   Active cards, completed-step waiting advice and immutable delivery history

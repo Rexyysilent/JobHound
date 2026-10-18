@@ -32,6 +32,8 @@ def selected_outcome_facts(raw):
     from .v41.outcomes import (OutcomeProjection, AssessmentIdentity, WorkIdentity,
         ASSESSMENT_PREDICATES, WORK_PREDICATES, predicate_key)
     projection = OutcomeProjection.model_validate(raw)
+    if not projection.has_action_facts():
+        return None
     step = projection.value('assessment_step')
     work = projection.value('work_selection')
     step = step if isinstance(step, AssessmentIdentity) else None
@@ -39,6 +41,8 @@ def selected_outcome_facts(raw):
     facts = []
     keys = set()
     for event in projection.events:
+        if event.outbound is not None:
+            continue
         if event.predicate=='work_deadline' and work is not None and (
                 projection.facts('work_state',work=work) or projection.facts('invoice',work=work)
                 or projection.facts('collected_payment',work=work)):
@@ -173,7 +177,7 @@ def _select_actions(items, *, action_cap, verify_cap, total_cap):
                                             *item.decision.priority_key.sort_tuple))
     lanes = {_id(item): _lane(item) for item in ordered}
     discovery = next((item for item in ordered if lanes[_id(item)] == 'action'
-                      and item.canonical.outcome_projection is None), None)
+                      and not (item.canonical.outcome_projection and item.canonical.outcome_projection.has_action_facts())), None)
     reserved = discovery if action_cap else None
     def select(candidates):
         companies,marketplaces,counts=Counter(),Counter(),Counter()
@@ -195,7 +199,8 @@ def _select_actions(items, *, action_cap, verify_cap, total_cap):
     normal,_=select(ordered)
     ready=[item for item in normal if lanes[_id(item)]=='action']
     displacement=(reserved is not None and len(ready)==action_cap and ready and all(
-        item.canonical.outcome_projection is not None and item.decision.priority_key.supported_urgency==1 for item in ready))
+        item.canonical.outcome_projection is not None and item.canonical.outcome_projection.has_action_facts()
+        and item.decision.priority_key.supported_urgency==1 for item in ready))
     reservation=dict(canonical_id=None,reason='no_available_suitable_discovery',displaced_discovery=None,urgent_existing=[])
     if displacement:
         reservation.update(reason='supported_urgent_existing',displaced_discovery=_id(reserved),
@@ -265,7 +270,7 @@ def stage_handoff_signals(outbox, result, destinations, *, now, card_cap, status
         candidates = 0
         for item in result.evaluated:
             identity, revision, lane = _id(item), revisions[_id(item)], _lane(item)
-            scoped = item.canonical.outcome_projection is not None
+            scoped = bool(item.canonical.outcome_projection and item.canonical.outcome_projection.has_action_facts())
             baseline = _baseline_state(outbox, identity, target, revision, rows[identity], now=now)
             if lane == 'status' and not scoped and baseline == 'new':
                 counts['ineligible'] += 1

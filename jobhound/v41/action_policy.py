@@ -211,6 +211,8 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     if not route:
         _task(assessment, canonical, 'application_route', 'Locate the individual role application/contact path, not a board index or company home page.', now, 'automatic_adapter', attempts)
     for unresolved in assessment.unresolved:
+        if unresolved.startswith('language_unverified:'):
+            _task(assessment, canonical, unresolved, 'Confirm the required language modality and level against the original role, then obtain a dated explicit profile declaration resolving the proficiency or task-preference uncertainty.', now)
         if unresolved.startswith(('credential_unverified:', 'requirement_unverified:', 'experience_unverified:', 'specialist_', 'location_scope_', 'pay_conflict', 'title_truncated', 'company_identity_')):
             _task(assessment, canonical, unresolved, 'Compare the cited requirement or conflicting field against the original posting and the operator’s documented evidence.', now)
     # A contradiction in explicit eligibility evidence is more decision-relevant

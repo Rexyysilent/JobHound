@@ -646,7 +646,7 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                                            run_id=result.metadata.run_id,as_of=as_of,now=now)
         if item.decision.action_band.value != 'reject' and item.decision.lifecycle == 'active':
             active.append(item)
-        elif item.canonical.outcome_projection is not None or outbox.conn.execute(
+        elif (item.canonical.outcome_projection is not None and item.canonical.outcome_projection.has_action_facts()) or outbox.conn.execute(
             '''SELECT 1 FROM delivery_baselines
                WHERE workspace=? AND profile=? AND subject=? LIMIT 1''',
             (outbox.workspace, outbox.profile, outbox.subject(identity)),
@@ -663,7 +663,8 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
         available = []
         policy_changed = 0          # informational; 'policy_review' counts holds (none now)
         for item in [*active,*statuses]:
-            if item.canonical.canonical_id not in active_ids and item.canonical.outcome_projection is None:
+            if item.canonical.canonical_id not in active_ids and not (
+                    item.canonical.outcome_projection and item.canonical.outcome_projection.has_action_facts()):
                 # Public closure/blocking updates belong only to destinations
                 # that accepted an earlier version of this opening.
                 delivered = outbox.conn.execute(

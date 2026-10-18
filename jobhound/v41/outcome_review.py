@@ -183,6 +183,8 @@ def run_outcome_review(snapshot, events_path, bindings_path, output_dir, *, as_o
                 'event_ids': [e.event_id for e in item.canonical.outcome_projection.events] if item.canonical.outcome_projection is not None else [],
                 'binding_hold': item.canonical.outcome_binding_hold}
             projection = item.canonical.outcome_projection
+            if projection is not None and projection.outbound_status():
+                status['outbound_messages'] = projection.outbound_status()
             work_action = item.assessment.account_state.get('_reviewed_work_action')
             if work_action is not None:
                 status['work_action'] = work_action

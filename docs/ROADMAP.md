@@ -8,8 +8,8 @@ review budgets. Current operation does not depend on completing every item here.
 
 | Area | Current behavior |
 | --- | --- |
-| Evidence and decisions | Native pay/geography, requirement scopes, source identity, page-type gates, exact roles and actor-scoped community threads |
-| Outcome review | Historical attempts, exact assessment revisions, buyer terms, work allocations and settlement facts; reviewed-file workflow only |
+| Evidence and decisions | Native pay/geography, amount-specific payout minima, dated language scopes, source identity, page-type gates, exact roles and actor-scoped community threads |
+| Outcome review | Historical attempts, exact assessment revisions, buyer terms, work allocations, settlement facts and record-only outbound bounces; reviewed-file workflow only |
 | Delivery | Durable per-destination receipts in approved runs; compact handoff signals and reviewed mixed-draft reissue in disposable offline state |
 | Source expansion | Shared HTTP/logical budgets, cadence and adequately covered-check records; readers do not automatically admit new daily sources |
 | Local workflow | Named profiles, isolated data directories, `local doctor`, fictional demo, reviewed-file commands and closed-state backup/restore |
@@ -26,7 +26,7 @@ example is complete. See [the change summary](CHANGES.md) and
 
 | Work | Completion condition |
 | --- | --- |
-| Remaining source-specific behavior | Original-source outcome reconciliation, cross-capture buyer closure/edit history, payout feasibility, unfamiliar employer templates/plain-text form segmentation, dated language conflicts and bounced-contact facts. Native Turing/micro1 roles, V5.5 ATS HTML feeds and generic JobPosting hydration exclude explicit application controls from role evidence. Selected-step completion and private buyer negotiation have existing reviewed-input controls. No new competition score is required for current private negotiation. |
+| Remaining source-specific behavior | Original-source outcome reconciliation, cross-capture buyer closure/edit history, unfamiliar employer templates/plain-text form segmentation and other source-specific partial cases. Exact same-observation payout minima, optional dated language declarations and reviewed message/contact-scoped bounce facts are implemented; unknown terms and unauthenticated inputs remain explicit. Native Turing/micro1 roles, V5.5 ATS HTML feeds and generic JobPosting hydration exclude explicit application controls from role evidence. Selected-step completion and private buyer negotiation have existing reviewed-input controls. No new competition score is required for current private negotiation. |
 | Independent recommendation quality | Freeze at least 100 independently labeled records with 20 actionable positives; measure at least 95% Primary precision, 90% positive retention, 80% displayed Verify usefulness, zero known critical leaks and complete material-claim support. Retain three independent complete frozen live-shadow captures without production notifications or database writes. |
 | Expanded source effectiveness | For each claimed source/route, report adequately covered bounded checks, unique actionable yield, duplicates, review effort and native costs; partial/failed retrieval remains missing coverage |
 | Live outcome integration | Review an authenticated outcome stream and channel mapping, then verify scoped transitions, uncertain receipt reconciliation and settlement evidence before enabling production use |

@@ -160,6 +160,11 @@ def _stable_text(value: Any) -> Any:
 def _outcome_facts(projection: Any) -> Any:
     if not projection:
         return None
+    from .v41.outcomes import OUTBOUND_PREDICATES
+    events = [event for event in projection.get('events', [])
+              if event.get('predicate') not in OUTBOUND_PREDICATES]
+    if not events:
+        return None
     current = {
         identity
         for identities in projection.get('current', {}).values()
@@ -167,13 +172,14 @@ def _outcome_facts(projection: Any) -> Any:
     }
     facts = [
         {key: event.get(key) for key in ('predicate', 'value', 'actor', 'expires_at')}
-        for event in projection.get('events', [])
+        for event in events
         if event.get('event_id') in current
     ]
     return {
         'scope': projection.get('scope'),
         'facts': sorted(facts, key=canonical_json),
-        'conflicts': sorted(projection.get('conflicts') or []),
+        'conflicts': sorted(key for key in (projection.get('conflicts') or [])
+                            if not key.startswith('outbound:')),
     }
 
 
