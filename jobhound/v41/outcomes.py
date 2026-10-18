@@ -78,6 +78,12 @@ class WorkIdentity(StrictModel):
     revision: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
 
 
+class OutboundIdentity(StrictModel):
+    """Opaque local references; addresses and message bodies stay outside imports."""
+    message_id: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+    contact_id: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+
+
 class MoneyClaim(StrictModel):
     # Explicit decimal text and currency: no bool/string-to-float ambiguity,
     # default currency, conversion, aggregation or implied full settlement.
@@ -144,10 +150,18 @@ WORK_ENUMS = {
 }
 WORK_PREDICATES = {*WORK_ENUMS, 'work_terms', 'work_checks', 'work_cost',
                    'work_route', 'invoice', 'collected_payment', 'work_deadline'}
+OUTBOUND_ENUMS = {
+    'outbound_state': {'sent', 'provider_accepted', 'bounced'},
+    'contact_origin': {'generated', 'observed'},
+}
+OUTBOUND_PREDICATES = set(OUTBOUND_ENUMS)
 
 
 def predicate_key(predicate: str, assessment: AssessmentIdentity | None = None,
-                  work: WorkIdentity | None = None) -> str:
+                  work: WorkIdentity | None = None,
+                  outbound: OutboundIdentity | None = None) -> str:
+    if outbound is not None:
+        return 'outbound:' + json.dumps(outbound.model_dump(), sort_keys=True, separators=(',', ':')) + ':' + predicate
     if work is not None:
         return 'work:' + json.dumps(work.model_dump(), sort_keys=True, separators=(',', ':')) + ':' + predicate
     if assessment is None:
@@ -162,17 +176,18 @@ _ENUMS = {
     'buyer_reply': {'substantive', 'scope_changed'},
 }
 _PREDICATES = {*_ENUMS, *WORK_PREDICATES, 'scope_revision', 'agreed_scope_revision',
-               *ASSESSMENT_PREDICATES, 'assessment_step', 'work_selection'}
+               *ASSESSMENT_PREDICATES, 'assessment_step', 'work_selection', *OUTBOUND_PREDICATES}
 
 
 class OutcomeEvent(StrictModel):
-    schema_version: Literal[1, 2, 3]
+    schema_version: Literal[1, 2, 3, 4]
     event_id: str = Field(min_length=1, max_length=160, pattern=r'^[\w.:-]+$')
     scope: OutcomeScope
     predicate: str
     value: str | ActionChecks | ActionCost | AssessmentIdentity | WorkIdentity | WorkTerms | WorkChecks | WorkCost | MoneyClaim | ActionDeadline
     assessment: AssessmentIdentity | None = None
     work: WorkIdentity | None = None
+    outbound: OutboundIdentity | None = None
     actor: Literal['user', 'provider', 'buyer']
     source_kind: Literal['user_report', 'mail', 'community', 'reviewed_seed']
     evidence_ref: str = Field(min_length=1, max_length=160, pattern=r'^[\w.:-]+$')
@@ -193,6 +208,8 @@ class OutcomeEvent(StrictModel):
             data.pop('assessment', None)
         if self.work is None:
             data.pop('work', None)
+        if self.outbound is None:
+            data.pop('outbound', None)
         return data
 
     @field_validator('schema_version', mode='before')
@@ -218,6 +235,19 @@ class OutcomeEvent(StrictModel):
     def supported_fact(self):
         if self.predicate not in _PREDICATES:
             raise ValueError('unsupported_predicate')
+        if self.predicate in OUTBOUND_PREDICATES:
+            if self.schema_version != 4 or self.outbound is None:
+                raise ValueError('outbound_identity_requires_version_4')
+            if self.source_kind not in {'mail', 'user_report'} or self.actor not in {'user', 'provider'}:
+                raise ValueError('outbound_reviewed_observation_required')
+            if self.predicate == 'outbound_state':
+                expected_actor = 'user' if self.value == 'sent' else 'provider'
+                if self.actor != expected_actor:
+                    raise ValueError('outbound_actor_mismatch')
+            if self.predicate == 'contact_origin' and self.value == 'generated' and self.actor != 'user':
+                raise ValueError('generated_contact_requires_user')
+        elif self.schema_version == 4 or self.outbound is not None:
+            raise ValueError('version_4_is_outbound_only')
         if self.predicate=='assessment_deadline' and (self.schema_version!=2 or self.assessment is None):
             raise ValueError('assessment_deadline_requires_exact_step')
         if self.assessment is not None or self.predicate == 'assessment_step':
@@ -236,7 +266,7 @@ class OutcomeEvent(StrictModel):
             raise ValueError('assessment_identity_required')
         if self.assessment is not None and self.predicate not in ASSESSMENT_PREDICATES:
             raise ValueError('assessment_identity_not_applicable')
-        enums = _ENUMS | WORK_ENUMS
+        enums = _ENUMS | WORK_ENUMS | OUTBOUND_ENUMS
         if self.predicate in enums and (
             not isinstance(self.value, str) or self.value not in enums[self.predicate]
         ):
@@ -292,34 +322,56 @@ class OutcomeProjection(StrictModel):
     conflicts: list[str]
     dispositions: dict[str, str]
 
+    def has_action_facts(self) -> bool:
+        return any(e.predicate not in OUTBOUND_PREDICATES for e in self.events)
+
     def facts(self, predicate: str, *, assessment: AssessmentIdentity | None = None,
-              work: WorkIdentity | None = None) -> list[OutcomeEvent]:
-        ids = set(self.current.get(predicate_key(predicate, assessment, work), []))
+              work: WorkIdentity | None = None,
+              outbound: OutboundIdentity | None = None) -> list[OutcomeEvent]:
+        ids = set(self.current.get(predicate_key(predicate, assessment, work, outbound), []))
         return [e for e in self.events if e.event_id in ids]
 
     def value(self, predicate: str, *, assessment: AssessmentIdentity | None = None,
-              work: WorkIdentity | None = None):
-        facts = self.facts(predicate, assessment=assessment, work=work)
-        return facts[0].value if facts and predicate_key(predicate, assessment, work) not in self.conflicts else None
+              work: WorkIdentity | None = None, outbound: OutboundIdentity | None = None):
+        facts = self.facts(predicate, assessment=assessment, work=work, outbound=outbound)
+        return facts[0].value if facts and predicate_key(predicate, assessment, work, outbound) not in self.conflicts else None
+
+    def outbound_status(self) -> list[dict]:
+        """Delivery observations never establish a reply, conversion or contact verification."""
+        identities = {e.outbound.model_dump_json(): e.outbound for e in self.events if e.outbound is not None}
+        return [dict(identity.model_dump(),
+                     state=self.value('outbound_state', outbound=identity),
+                     contact_origin=self.value('contact_origin', outbound=identity),
+                     verification_state='unverified_by_outbound_event',
+                     evidence=[dict(event_id=e.event_id, evidence_ref=e.evidence_ref,
+                                    actor=e.actor, source_kind=e.source_kind,
+                                    support_path=e.support_path, support_sha256=e.support_sha256,
+                                    event_at=e.event_at.isoformat() if e.event_at else None,
+                                    observed_at=e.observed_at.isoformat())
+                               for e in self.events if e.outbound == identity])
+                for _, identity in sorted(identities.items())]
 
     def action_conflicts(self) -> list[str]:
         """Historical assessment conflicts do not veto a different selected step."""
+        # Outbound observations are record-only. They cannot change discovery
+        # decisions or veto a genuine, independently supported buyer reply.
+        conflicts = [key for key in self.conflicts if not key.startswith('outbound:')]
         work = self.value('work_selection')
         if isinstance(work, WorkIdentity):
             relevant = {predicate_key(e.predicate, e.assessment, e.work) for e in self.events
                         if e.work == work or e.predicate in {'work_selection', 'application_state', 'project_access'}}
             if self.facts('work_state',work=work) or self.facts('invoice',work=work) or self.facts('collected_payment',work=work):
                 relevant.discard(predicate_key('work_deadline',work=work))
-            return [key for key in self.conflicts if key in relevant]
+            return [key for key in conflicts if key in relevant]
         selected = self.value('assessment_step')
         if not isinstance(selected, AssessmentIdentity):
-            return self.conflicts
+            return conflicts
         relevant = {predicate_key(e.predicate, e.assessment) for e in self.events
                     if (e.assessment == selected or
                         e.assessment is None and e.predicate not in ASSESSMENT_PREDICATES)}
         if self.value('assessment_state',assessment=selected) in {'completed','passed'}:
             relevant.discard(predicate_key('assessment_deadline',assessment=selected))
-        return [key for key in self.conflicts if key in relevant]
+        return [key for key in conflicts if key in relevant]
 
 
 def _encoded(event: OutcomeEvent) -> str:
@@ -331,7 +383,7 @@ def project(events: list[OutcomeEvent], scope: OutcomeScope) -> OutcomeProjectio
     rows = sorted([e for e in events if e.scope == scope], key=lambda e: e.event_id)
     grouped: dict[str, list[OutcomeEvent]] = defaultdict(list)
     for event in rows:
-        grouped[predicate_key(event.predicate, event.assessment, event.work)].append(event)
+        grouped[predicate_key(event.predicate, event.assessment, event.work, event.outbound)].append(event)
     current, conflicts, dispositions = {}, [], {}
     for predicate, facts in sorted(grouped.items()):
         removed = {old for e in facts for old in e.supersedes}
@@ -339,6 +391,7 @@ def project(events: list[OutcomeEvent], scope: OutcomeScope) -> OutcomeProjectio
             for new in facts:
                 same_authority = (old.actor, old.source_kind) == (new.actor, new.source_kind)
                 terminal = (old.predicate in {'assessment_deadline','work_deadline'} or
+                            old.predicate == 'outbound_state' and old.value == 'bounced' or
                             old.predicate == 'application_state' and old.value in {'rejected', 'withdrawn'} or
                             old.assessment is not None and old.predicate == 'assessment_state' and old.value in {'completed', 'passed'} or
                             old.work is not None and (old.predicate in {'work_state', 'invoice', 'collected_payment'} or
@@ -416,6 +469,7 @@ def import_events(records: list[dict], bindings: list[OutcomeBinding], as_of: da
                 old = available.get(old_id)
                 if (old is None or old_id == identity or old.scope != event.scope
                     or old.predicate != event.predicate or old.assessment != event.assessment or old.work != event.work
+                    or old.outbound != event.outbound
                     or event.observed_at <= old.observed_at
                     or (old.event_at and event.event_at and event.event_at <= old.event_at)
                     or (event.source_kind == 'reviewed_seed' and old.source_kind != 'reviewed_seed')):

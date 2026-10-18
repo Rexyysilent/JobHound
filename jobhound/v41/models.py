@@ -162,6 +162,7 @@ class RequirementsAssessment(BaseModel):
     degree_requirement_state: str = "unknown"
     experience_evidence_state: str = "unknown"
     field_coverage: dict[str, str] = Field(default_factory=dict)
+    profile_language_evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RoleAssessment(BaseModel):
@@ -382,6 +383,7 @@ class Assessment(BaseModel):
     action_cost_known: bool = False
     action_cost_acceptable: bool = False
     time_to_cash_days: float | None = None
+    payout_feasibility: dict[str, Any] = Field(default_factory=dict)
     # A marketplace job seen only as a search-result snippet, never the full
     # posting. Stored so cards rendered from queued payloads can show it.
     search_snippet_only: bool = False

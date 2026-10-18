@@ -416,7 +416,7 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         profile.max_required_years,
     )
     if CONFIG.v55.enabled:
-        outcomes = requirement_outcomes(requirements_assessment, profile)
+        outcomes = requirement_outcomes(requirements_assessment, profile, as_of=as_of)
         # Scoped claims replace the old whole-section bag-of-words gate.
         credential_reasons = [r for r in outcomes.blockers if r.startswith('credential_mismatch:')]
         experience_reasons = [r for r in outcomes.blockers if r.startswith('experience_mismatch:')]
@@ -656,7 +656,9 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         }
         if completeness != "complete" and _SPECIALIST_TITLE.search(job.title):
             assessment.unresolved.append("specialist_requirements_unverified")
-        if assessment.role_assessment.specialist_domain_status == "unresolved":
+        if CONFIG.v55.enabled and any(reason.startswith('language_unverified:') for reason in assessment.unresolved):
+            assessment.eligibility = EligibilityStatus.UNKNOWN
+        elif assessment.role_assessment.specialist_domain_status == "unresolved":
             assessment.eligibility = EligibilityStatus.UNKNOWN
         elif (
             (technical_only or conventional_occupation)
@@ -729,6 +731,8 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         if canonical.best_observation.work_arrangement.state == 'conflicting':
             assessment.unresolved.append('location_scope_conflict:work_arrangement')
         apply_action_policy(canonical, assessment, as_of)
+        from .payout import apply_payout_constraints
+        apply_payout_constraints(canonical, assessment, as_of)
 
     # Evidence spans for hard decisions remain separate from match evidence.
     for reason in assessment.blockers:

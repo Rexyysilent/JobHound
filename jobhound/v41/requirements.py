@@ -7,7 +7,8 @@ deliberately excluded.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from collections.abc import Iterable
 
 from ..filters.eligibility import (
@@ -555,12 +556,16 @@ def _documented_years(claim: RequirementClaim, years: dict[str, float]) -> float
 def requirement_outcomes(
     requirements: RequirementsAssessment,
     profile: Profile,
+    *, as_of: datetime | None = None,
 ) -> RequirementOutcomes:
     """Evaluate only explicit profile evidence against extracted requirements.
 
     Search preferences and broad capability domains intentionally cannot satisfy
     employment duration, degrees, licences, or specialist credentials.
     """
+    # This projection belongs to this profile/as-of evaluation, not to the
+    # extracted job claims. Reused assessments must not retain prior profiles.
+    requirements.profile_language_evidence = []
     blockers: list[str] = []
     unverified: list[str] = []
     alternatives: list[str] = []
@@ -595,9 +600,31 @@ def requirement_outcomes(
         values = claim.value if isinstance(claim.value, list) else [claim.value]
         if claim.dimension == "language":
             demanded = {_canon_lang(str(value).casefold()) for value in values}
-            satisfied = bool(demanded & speaks) if claim.match_mode == "any" else demanded <= speaks
-            if not satisfied:
-                blockers.extend(f"lang_mismatch:{item}" for item in sorted(demanded - speaks))
+            statuses = []
+            for language in sorted(demanded):
+                scoped = _scoped_language_outcome(language, claim.span, profile, as_of)
+                if scoped is None:
+                    statuses.append((language in speaks, [], []))
+                    if language not in speaks:
+                        statuses[-1] = (False, [f"lang_mismatch:{language}"], [])
+                    continue
+                requirements.profile_language_evidence.append({
+                    **scoped, "observation_id": claim.observation_id,
+                    "source_field": claim.source_field, "span": claim.span,
+                })
+                state = scoped["state"]
+                reason = f'{language}:{scoped["modality"]}:{state}'
+                statuses.append((state == "supported",
+                    [f"lang_mismatch:{reason}"] if state in {"preference_avoided", "insufficient"} else [],
+                    [f"language_unverified:{reason}"] if state in {"unknown", "conflict"} else []))
+            if claim.match_mode == "any" and any(status[0] for status in statuses):
+                continue
+            if claim.match_mode == "any" and any(status[2] for status in statuses):
+                unverified.extend(reason for _, _, unknowns in statuses for reason in unknowns)
+                continue  # An unresolved alternative is not a proven failure.
+            for _, failures, unknowns in statuses:
+                blockers.extend(failures)
+                unverified.extend(unknowns)
         elif claim.dimension == "experience":
             needed = float(claim.value)
             skill = str(getattr(claim, "scope", "") or "general").casefold()
@@ -637,6 +664,87 @@ def requirement_outcomes(
         tuple(dict.fromkeys(unverified)),
         tuple(dict.fromkeys(alternatives)),
     )
+
+
+_LANGUAGE_LEVEL = {"unknown": -1, "basic": 0, "fluent": 1, "advanced": 2, "native": 3}
+_WRITTEN_WORK = re.compile(r"\b(?:written|writing|writers?|editorial|editors?|copywriting|proofreaders?|proofreading|editing)\b", re.I)
+_SPOKEN_WORK = re.compile(r"\b(?:spoken|speaking|speak|conversation|conversational|voice|audio)\b", re.I)
+
+
+def _language_task_scope(language: str, span: str, known: set[str]) -> tuple[str, str]:
+    """Use the language's own clause, not unrelated editorial/job prose."""
+    clauses = re.split(r"\b(?:and|or)\b|[,;]", span.casefold())
+    index = next((i for i, part in enumerate(clauses) if re.search(rf"\b{re.escape(language)}\b", part)), None)
+    local = clauses[index] if index is not None else ""
+    if index:
+        previous = clauses[index - 1]
+        # A shared modifier fragment ("advanced written and spoken Hindi")
+        # belongs to the same demand. A different language's clause does not.
+        if (_WRITTEN_WORK.search(previous) or _SPOKEN_WORK.search(previous)) and not any(
+            re.search(rf"\b{re.escape(name)}\b", previous) for name in known
+        ):
+            local = previous + " " + local
+    modality = "written" if _WRITTEN_WORK.search(local) else (
+        "spoken" if _SPOKEN_WORK.search(local) else "general")
+    level = "native" if re.search(r"\b(?:native|mother tongue)\b", local) else (
+        "advanced" if re.search(r"\b(?:advanced|editorial|editors?|writers?|proofreaders?|copywriting|proofreading|editing|c[12])\b", local) else (
+            "fluent" if re.search(r"\b(?:fluent|fluency|proficient|proficiency)\b", local) else "basic"))
+    return modality, level
+
+
+def _scoped_language_outcome(language, span, profile, as_of):
+    cutoff = (as_of or datetime.now(timezone.utc)).date().isoformat()
+    active = [record for record in profile.language_evidence
+              if record.language == language and
+              (record.event_date is None or record.event_date <= cutoff)]
+    if not active:
+        return None  # Opt-in: future declarations do not change past decisions.
+    modality, level = _language_task_scope(language, span, profile.known_languages)
+    applicable = [record for record in active if record.modality in {modality, "general"}]
+    needed = _LANGUAGE_LEVEL[level]
+    state = "unknown"
+    selected = []
+    # Preferences and proficiency are independent: a later ability claim does
+    # not retract an explicit preference against this work.
+    preferences = [record for record in applicable if record.stance in {"avoid", "allow"}
+                   and _LANGUAGE_LEVEL[record.level] <= needed]
+    capabilities = [record for record in applicable if record.stance == "capability"]
+    scoped_capabilities = [record for record in capabilities if record.modality == modality]
+    if scoped_capabilities:
+        capabilities = scoped_capabilities
+    latest_groups = []
+    for group in (preferences, capabilities):
+        dated = [record for record in group if record.event_date is not None]
+        latest = max((record.event_date for record in dated), default=None)
+        current = [record for record in group if record.event_date in {None, latest}]
+        latest_groups.append(current)
+        selected.extend(current)
+    current_preferences, current_capabilities = latest_groups
+    if any(record.event_date is None for record in selected):
+        state = "unknown"
+    elif len({record.stance for record in current_preferences}) > 1:
+        state = "conflict"
+    elif any(record.stance == "avoid" for record in current_preferences):
+        # Same-date capability and avoidance express distinct facts. The
+        # avoidance remains a preference, never a global language inability.
+        state = "preference_avoided"
+    elif current_capabilities:
+        levels = {record.level for record in current_capabilities}
+        if len(levels) > 1:
+            state = "conflict"
+        else:
+            record = current_capabilities[0]
+            if record.level == "unknown" or (
+                modality == "written" and needed >= _LANGUAGE_LEVEL["advanced"]
+                and record.modality != "written"
+            ):
+                state = "unknown"
+            else:
+                state = "supported" if _LANGUAGE_LEVEL[record.level] >= needed else "insufficient"
+    record_key = lambda record: (record.event_date or "", record.modality, record.stance, record.level, record.evidence_id, record.source)
+    return {"language": language, "modality": modality, "required_level": level,
+            "state": state, "evidence": [asdict(record) for record in sorted(applicable, key=record_key)],
+            "selected_evidence_ids": [record.evidence_id for record in sorted(selected, key=record_key)]}
 
 
 def _dedupe(claims: Iterable[RequirementClaim]) -> list[RequirementClaim]:

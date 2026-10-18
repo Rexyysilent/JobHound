@@ -602,6 +602,17 @@ def _platform_pool_amount_context(quote):
 
 def _pay_context_scope(quote, title):
     """Explicit attribution only; keep rejected claims available for inspection."""
+    # A payout floor describes the rail, not this worker's compensation. Keep
+    # mixed wage/threshold sentences unresolved rather than dropping the wage.
+    amounts = money_expression_spans(quote)
+    if len(amounts) == 1:
+        left = quote[:amounts[0][0]]
+        if re.search(
+            r'\b(?:wire(?: transfer)?|bank transfer|payout|payment)\b[^.!?;\n]{0,100}'
+            r'\b(?:above|over|more than|greater than|at least|minimum(?: payout)?(?: of)?)\s*$',
+            left, re.I,
+        ):
+            return 'non_pay_context'
     # Denying an expense does not turn the adjacent wage into an expense.
     context = re.sub(
         r"\b(?:no|without|zero)\s+(?:application\s+fees?|security\s+deposits?|subscription\s+costs?)\b",

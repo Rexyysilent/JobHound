@@ -100,7 +100,7 @@ def describe_evidence(canonical, assessment):
     complete = any(o.content_state in {'complete', 'role_complete'} for o in canonical.observations)
     eligibility_blocks = [b for b in assessment.blockers if b.startswith(('location:', 'language:', 'credentials:'))]
     eligibility_unknowns = [u for u in assessment.unresolved if u.startswith((
-        'credential_unverified:', 'requirement_unverified:', 'experience_unverified:',
+        'credential_unverified:', 'requirement_unverified:', 'experience_unverified:', 'language_unverified:',
         'specialist_', 'location_scope_', 'technical_requirements_', 'requirements_not_'))]
     eligibility_complete = assessment.requirements_assessment.completeness == 'complete'
     eligibility = 'failed' if eligibility_blocks else 'unknown' if eligibility_unknowns or not eligibility_complete else 'passed'

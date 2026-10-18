@@ -113,6 +113,13 @@ inspection cost and adequately covered checks before expanding a source.
 
 ### v5.7 outcomes: remember what actually happened
 
+Optional [dated language declarations](docs/dated_language_evidence.md) distinguish
+spoken capability, advanced written requirements and task preferences. Explicit
+[payout minimums](docs/payout_feasibility.md) are checked against the particular
+fixed project amount, rather than treating a payment-method logo as feasibility.
+Reviewed [outbound observations](docs/outbound_outcomes.md) preserve bounces and
+alternate sends without counting them as buyer replies or verified contacts.
+
 Delivered job status updates use compact Watch, Historical Lead, Closed or Skip
 entries with the reason and next step. Parked leads no longer look like fresh
 Verify cards. Active cards retain their full detail, and status updates do not

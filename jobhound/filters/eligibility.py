@@ -15,10 +15,43 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from datetime import date
+from typing import Literal
 
 import yaml
 
 _PROFILE_PATH = Path(__file__).resolve().parent.parent.parent / "profile.yaml"
+
+
+@dataclass(frozen=True)
+class LanguageEvidence:
+    """An explicit profile declaration, never extracted from a job or biography.
+
+    ``avoid`` is a task preference, not a claim of inability. Its level is the
+    lowest proficiency-demanding work avoided within the stated modality.
+    Unknown event dates stay unknown; collection time is not a substitute.
+    """
+    language: str
+    modality: Literal["general", "spoken", "written"]
+    level: Literal["unknown", "basic", "fluent", "advanced", "native"]
+    stance: Literal["capability", "avoid", "allow"]
+    evidence_id: str
+    source: str
+    event_date: str | None = None
+
+    def __post_init__(self):
+        if self.modality not in {"general", "spoken", "written"}:
+            raise ValueError("invalid language evidence modality")
+        if self.level not in {"unknown", "basic", "fluent", "advanced", "native"}:
+            raise ValueError("invalid language evidence level")
+        if self.stance not in {"capability", "avoid", "allow"}:
+            raise ValueError("invalid language evidence stance")
+        if not all(isinstance(v, str) and v.strip() for v in
+                   (self.language, self.evidence_id, self.source)):
+            raise ValueError("language evidence requires language, id and source")
+        object.__setattr__(self, "language", _canon_lang(self.language.casefold()))
+        if self.event_date is not None:
+            object.__setattr__(self, "event_date", date.fromisoformat(str(self.event_date)).isoformat())
 
 
 @dataclass
@@ -49,6 +82,14 @@ class Profile:
     absent_formal_credentials: set[str] = field(default_factory=set)
     documented_professional_years: dict[str, float] = field(default_factory=dict)
     target_lanes: set[str] = field(default_factory=set)
+    language_evidence: list[LanguageEvidence] = field(default_factory=list)
+
+    def __post_init__(self):
+        # Also restores nested records from immutable RunContext JSON snapshots.
+        self.language_evidence = [
+            record if isinstance(record, LanguageEvidence) else LanguageEvidence(**record)
+            for record in self.language_evidence
+        ]
 
     @classmethod
     def from_config(cls, cfg: dict) -> "Profile":
@@ -107,6 +148,8 @@ class Profile:
             target_lanes={
                 str(item).lower() for item in (cfg.get("target_lanes") or [])
             },
+            language_evidence=[LanguageEvidence(**record) for record in
+                               (cfg.get("language_evidence") or [])],
         )
 
     def claimed_domains(self) -> set[str]:
