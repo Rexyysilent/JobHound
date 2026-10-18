@@ -31,7 +31,7 @@ def selected_outcome_facts(raw):
     if raw is None:
         return None
     from .v41.outcomes import (OutcomeProjection, AssessmentIdentity, WorkIdentity,
-        ASSESSMENT_PREDICATES, WORK_PREDICATES, predicate_key)
+        ASSESSMENT_PREDICATES, WORK_PREDICATES, predicate_key, SetupIdentity, SETUP_PREDICATES, setup_identity)
     projection = OutcomeProjection.model_validate(raw)
     if not projection.has_action_facts():
         return None
@@ -39,11 +39,20 @@ def selected_outcome_facts(raw):
     work = projection.value('work_selection')
     step = step if isinstance(step, AssessmentIdentity) else None
     work = work if isinstance(work, WorkIdentity) else None
+    setup = projection.value('setup_selection')
+    setup = setup if isinstance(setup, SetupIdentity) else None
     facts = []
     keys = set()
     for event in projection.events:
         if event.outbound is not None:
             continue
+        if event.predicate in SETUP_PREDICATES:
+            # Details-change mail is audit-only. It cannot reissue an already
+            # reported completion or alter an independently selected work/test.
+            if event.predicate == 'setup_details_changed' or work is not None or step is not None:
+                continue
+            if event.predicate == 'setup_checklist' and setup_identity(event.value) != setup:
+                continue
         if event.predicate=='work_deadline' and work is not None and (
                 projection.facts('work_state',work=work) or projection.facts('invoice',work=work)
                 or projection.facts('collected_payment',work=work)):
@@ -60,7 +69,8 @@ def selected_outcome_facts(raw):
             relevant = event.assessment is None and event.work is None
         if not relevant:
             continue
-        key = predicate_key(event.predicate, event.assessment, event.work)
+        identity = setup_identity(event.value) if event.predicate == 'setup_checklist' else None
+        key = predicate_key(event.predicate, event.assessment, event.work, setup=identity)
         keys.add(key)
         if event.event_id not in projection.current.get(key, []):
             continue
@@ -359,6 +369,9 @@ def compact_status(payload):
             if predicate in {'application_state', 'assessment_state', 'project_access',
                              'allocation_state', 'work_access', 'payment_setup', 'payable_approval', 'work_state'}:
                 details.append(f"recorded {predicate.replace('_', ' ')}: {value}")
+            elif predicate == 'setup_checklist' and isinstance(value, dict):
+                label = 'user-reported' if fact.get('source_kind') == 'user_report' else 'provider-reported'
+                details.append(f"{label} setup checklist {value['checklist_id']}, revision {value['revision']}: {value['state']}; payable approval and task allocation unconfirmed")
             elif predicate in {'invoice', 'collected_payment'} and isinstance(value, dict):
                 label = 'invoice claim' if predicate == 'invoice' else 'recipient-reported receipt'
                 details.append(f"{label}: {value['currency']} {value['amount']}")
@@ -368,4 +381,6 @@ def compact_status(payload):
     plan = (payload.get('assessment', {}).get('account_state') or {}).get('_reviewed_work_action')
     if isinstance(plan, dict) and plan.get('prerequisites'):
         caveat += ' Evidence/prerequisites remain unresolved.'
+    if isinstance(plan, dict) and (plan.get('terms') or {}).get('ai_assistance') == 'prohibited':
+        caveat += ' Assigned-task terms prohibit AI assistance; manual task work only.'
     return f"- {title}{' — ' + company if company else ''}: {'; '.join(details)}.{caveat}"

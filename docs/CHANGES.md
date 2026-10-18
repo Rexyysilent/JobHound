@@ -1,5 +1,12 @@
 # Current implementation changes
 
+- Reconcile selected pre-allocation setup checklists: preserve user completion,
+  suppress obsolete reminders and keep payable/allocation status unconfirmed.
+- Preserve explicit reviewed no-AI restrictions in assigned-work instructions
+  and completed status without rejecting valid manual work.
+- Apply explicit form boundaries to provider plain descriptions and reject
+  forged internal closure markers; add native compound requirement witnesses.
+
 - Exclude explicitly delimited plain/visible application forms; retain genuine
   role tails and hold uncertain boundaries.
 - Enforce explicit onsite obligations and exact expert domains without rejecting

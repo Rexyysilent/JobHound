@@ -74,3 +74,10 @@ terms and optional next-action cost. Current IDs mean projection membership,
 not blanket freshness. Original claims remain in the journal/projection. There
 is no payment integration, live mailbox import, production private-state write,
 task execution or additional permission.
+
+
+Reviewed `work_terms` may include `ai_assistance: prohibited` or
+`ai_assistance: allowed`. Omission means unknown and preserves the legacy event
+shape. A prohibition remains visible for active manual work and completed
+status, scoped to the selected allocation and terms revision. This field does
+not execute work or grant automation permission.

@@ -98,3 +98,34 @@ an accepted payload for that destination. Missing or mismatched proof requires
 review. Adoption creates no send or acceptance receipt; genuine scope/pay changes
 remain material. Saved native community-thread v2 evidence is unchanged, and
 legacy delivery rollback still requires a pre-handoff database backup.
+
+
+## Reviewed setup and assigned-work restrictions
+
+Schema-5 setup facts identify an exact pre-allocation checklist and revision,
+with an explicit reviewed selection. A dated user completion can supersede an
+older reminder while retaining both facts. Its compact status is labeled
+user-reported; payable approval and allocation remain unknown. A payment-details
+change notice does not establish completion or reissue the completed status.
+Ambiguous selection, conflict or undated completion requires verification.
+Selected assessments, assigned work and account/terminal states keep priority.
+This is explicit reviewed-file input, not automatic mail extraction.
+
+The schema-5 predicates are `setup_selection`, `setup_checklist` and
+`setup_details_changed`. Their value identifies `checklist_id` and `revision`;
+`setup_checklist` additionally requires `state: pending` or `state: completed`.
+Use the normal exact reviewed binding and event provenance. `user_report`
+requires actor `user`; `mail` requires actor `provider`. An explicit same-scope
+`supersedes` edge reconciles a user completion with the older provider reminder.
+The details-change predicate only records the notice. Old schema-1 through
+schema-4 events retain their existing serialized shape.
+
+Reviewed allocation terms optionally record `ai_assistance` as `prohibited` or
+`allowed`. A prohibition produces manual-work guidance and remains visible in
+completed status. Omission means unknown and preserves legacy serialized terms;
+no execution permission is inferred. Terms for another allocation do not apply.
+
+Provider-selected plain descriptions now use explicit standalone form boundaries
+as well as actual HTML control boundaries. Raw provider comments cannot supply
+internal parser closure markers. Undelimited prose and unfamiliar templates
+remain bounded extraction limits, with no universal parser guarantee.

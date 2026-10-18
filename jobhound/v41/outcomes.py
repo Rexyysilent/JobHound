@@ -51,6 +51,22 @@ class OutcomeBinding(StrictModel):
     active: StrictBool = True
 
 
+class SetupIdentity(StrictModel):
+    checklist_id: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+    revision: str = Field(min_length=1, max_length=80, pattern=r'^[\w.-]+$')
+
+
+class SetupChecklist(SetupIdentity):
+    state: Literal['pending', 'completed']
+
+
+SETUP_PREDICATES = {'setup_checklist', 'setup_details_changed', 'setup_selection'}
+
+
+def setup_identity(value):
+    return SetupIdentity(checklist_id=value.checklist_id, revision=value.revision) if isinstance(value, SetupIdentity) else None
+
+
 class ActionChecks(StrictModel):
     privacy: StrictBool | None = None
     schedule: StrictBool | None = None
@@ -101,6 +117,14 @@ class MoneyClaim(StrictModel):
 
 class WorkTerms(MoneyClaim):
     unit: Literal['labor_hour', 'task', 'deliverable']
+    ai_assistance: Literal['prohibited', 'allowed'] | None = None
+
+    @model_serializer(mode='wrap')
+    def preserve_legacy_terms(self, handler):
+        data = handler(self)
+        if self.ai_assistance is None:
+            data.pop('ai_assistance', None)
+        return data
 
 
 class WorkChecks(ActionChecks):
@@ -159,7 +183,9 @@ OUTBOUND_PREDICATES = set(OUTBOUND_ENUMS)
 
 def predicate_key(predicate: str, assessment: AssessmentIdentity | None = None,
                   work: WorkIdentity | None = None,
-                  outbound: OutboundIdentity | None = None) -> str:
+                  outbound: OutboundIdentity | None = None, setup: SetupIdentity | None = None) -> str:
+    if setup is not None:
+        return 'setup:' + json.dumps(setup.model_dump(), sort_keys=True, separators=(',', ':')) + ':' + predicate
     if outbound is not None:
         return 'outbound:' + json.dumps(outbound.model_dump(), sort_keys=True, separators=(',', ':')) + ':' + predicate
     if work is not None:
@@ -176,15 +202,15 @@ _ENUMS = {
     'buyer_reply': {'substantive', 'scope_changed'},
 }
 _PREDICATES = {*_ENUMS, *WORK_PREDICATES, 'scope_revision', 'agreed_scope_revision',
-               *ASSESSMENT_PREDICATES, 'assessment_step', 'work_selection', *OUTBOUND_PREDICATES}
+               *ASSESSMENT_PREDICATES, 'assessment_step', 'work_selection', *OUTBOUND_PREDICATES, *SETUP_PREDICATES}
 
 
 class OutcomeEvent(StrictModel):
-    schema_version: Literal[1, 2, 3, 4]
+    schema_version: Literal[1, 2, 3, 4, 5]
     event_id: str = Field(min_length=1, max_length=160, pattern=r'^[\w.:-]+$')
     scope: OutcomeScope
     predicate: str
-    value: str | ActionChecks | ActionCost | AssessmentIdentity | WorkIdentity | WorkTerms | WorkChecks | WorkCost | MoneyClaim | ActionDeadline
+    value: str | ActionChecks | ActionCost | AssessmentIdentity | WorkIdentity | WorkTerms | WorkChecks | WorkCost | MoneyClaim | ActionDeadline | SetupChecklist | SetupIdentity
     assessment: AssessmentIdentity | None = None
     work: WorkIdentity | None = None
     outbound: OutboundIdentity | None = None
@@ -227,7 +253,8 @@ class OutcomeEvent(StrictModel):
         expected = {'work_selection': WorkIdentity, 'work_terms': WorkTerms,
                     'work_checks': WorkChecks, 'work_cost': WorkCost,
                     'invoice': MoneyClaim, 'collected_payment': MoneyClaim,
-                    'assessment_deadline':ActionDeadline,'work_deadline':ActionDeadline}
+                    'assessment_deadline':ActionDeadline,'work_deadline':ActionDeadline,
+                    'setup_checklist':SetupChecklist,'setup_selection':SetupIdentity,'setup_details_changed':SetupIdentity}
         model = expected.get(info.data.get('predicate'))
         return model.model_validate(value) if model is not None else value
 
@@ -235,6 +262,17 @@ class OutcomeEvent(StrictModel):
     def supported_fact(self):
         if self.predicate not in _PREDICATES:
             raise ValueError('unsupported_predicate')
+        if self.predicate in SETUP_PREDICATES:
+            if self.schema_version != 5 or self.assessment is not None or self.work is not None or self.outbound is not None:
+                raise ValueError('setup_requires_version_5_and_application_scope')
+            if self.source_kind not in {'mail', 'user_report'} or self.actor not in {'user', 'provider'}:
+                raise ValueError('setup_requires_reviewed_private_source')
+            if self.actor != ('user' if self.source_kind == 'user_report' else 'provider'):
+                raise ValueError('setup_actor_source_mismatch')
+            if not isinstance(self.value, SetupChecklist if self.predicate == 'setup_checklist' else SetupIdentity):
+                raise ValueError('invalid_setup_value')
+        elif self.schema_version == 5:
+            raise ValueError('version_5_is_setup_only')
         if self.predicate in OUTBOUND_PREDICATES:
             if self.schema_version != 4 or self.outbound is None:
                 raise ValueError('outbound_identity_requires_version_4')
@@ -327,14 +365,14 @@ class OutcomeProjection(StrictModel):
 
     def facts(self, predicate: str, *, assessment: AssessmentIdentity | None = None,
               work: WorkIdentity | None = None,
-              outbound: OutboundIdentity | None = None) -> list[OutcomeEvent]:
-        ids = set(self.current.get(predicate_key(predicate, assessment, work, outbound), []))
+              outbound: OutboundIdentity | None = None, setup: SetupIdentity | None = None) -> list[OutcomeEvent]:
+        ids = set(self.current.get(predicate_key(predicate, assessment, work, outbound, setup), []))
         return [e for e in self.events if e.event_id in ids]
 
     def value(self, predicate: str, *, assessment: AssessmentIdentity | None = None,
-              work: WorkIdentity | None = None, outbound: OutboundIdentity | None = None):
-        facts = self.facts(predicate, assessment=assessment, work=work, outbound=outbound)
-        return facts[0].value if facts and predicate_key(predicate, assessment, work, outbound) not in self.conflicts else None
+              work: WorkIdentity | None = None, outbound: OutboundIdentity | None = None, setup: SetupIdentity | None = None):
+        facts = self.facts(predicate, assessment=assessment, work=work, outbound=outbound, setup=setup)
+        return facts[0].value if facts and predicate_key(predicate, assessment, work, outbound, setup) not in self.conflicts else None
 
     def outbound_status(self) -> list[dict]:
         """Delivery observations never establish a reply, conversion or contact verification."""
@@ -356,6 +394,12 @@ class OutcomeProjection(StrictModel):
         # Outbound observations are record-only. They cannot change discovery
         # decisions or veto a genuine, independently supported buyer reply.
         conflicts = [key for key in self.conflicts if not key.startswith('outbound:')]
+        if self.value('application_state') in {'rejected', 'withdrawn'} or self.value('project_access') == 'blocked':
+            conflicts = [key for key in conflicts if not key.startswith('setup:') and key != 'setup_selection']
+        selected_setup = self.value('setup_selection')
+        if isinstance(selected_setup, SetupIdentity):
+            selected_key = predicate_key('setup_checklist', setup=selected_setup)
+            conflicts = [key for key in conflicts if not key.startswith('setup:') or key == selected_key]
         work = self.value('work_selection')
         if isinstance(work, WorkIdentity):
             relevant = {predicate_key(e.predicate, e.assessment, e.work) for e in self.events
@@ -368,7 +412,7 @@ class OutcomeProjection(StrictModel):
             return conflicts
         relevant = {predicate_key(e.predicate, e.assessment) for e in self.events
                     if (e.assessment == selected or
-                        e.assessment is None and e.predicate not in ASSESSMENT_PREDICATES)}
+                        e.assessment is None and e.predicate not in ASSESSMENT_PREDICATES | SETUP_PREDICATES)}
         if self.value('assessment_state',assessment=selected) in {'completed','passed'}:
             relevant.discard(predicate_key('assessment_deadline',assessment=selected))
         return [key for key in conflicts if key in relevant]
@@ -383,7 +427,8 @@ def project(events: list[OutcomeEvent], scope: OutcomeScope) -> OutcomeProjectio
     rows = sorted([e for e in events if e.scope == scope], key=lambda e: e.event_id)
     grouped: dict[str, list[OutcomeEvent]] = defaultdict(list)
     for event in rows:
-        grouped[predicate_key(event.predicate, event.assessment, event.work, event.outbound)].append(event)
+        setup = setup_identity(event.value) if event.predicate in {'setup_checklist', 'setup_details_changed'} else None
+        grouped[predicate_key(event.predicate, event.assessment, event.work, event.outbound, setup)].append(event)
     current, conflicts, dispositions = {}, [], {}
     for predicate, facts in sorted(grouped.items()):
         removed = {old for e in facts for old in e.supersedes}
@@ -391,6 +436,7 @@ def project(events: list[OutcomeEvent], scope: OutcomeScope) -> OutcomeProjectio
             for new in facts:
                 same_authority = (old.actor, old.source_kind) == (new.actor, new.source_kind)
                 terminal = (old.predicate in {'assessment_deadline','work_deadline'} or
+                            old.predicate == 'setup_checklist' and isinstance(old.value, SetupChecklist) and old.value.state == 'completed' or
                             old.predicate == 'outbound_state' and old.value == 'bounced' or
                             old.predicate == 'application_state' and old.value in {'rejected', 'withdrawn'} or
                             old.assessment is not None and old.predicate == 'assessment_state' and old.value in {'completed', 'passed'} or
@@ -470,6 +516,7 @@ def import_events(records: list[dict], bindings: list[OutcomeBinding], as_of: da
                 if (old is None or old_id == identity or old.scope != event.scope
                     or old.predicate != event.predicate or old.assessment != event.assessment or old.work != event.work
                     or old.outbound != event.outbound
+                    or (event.predicate in {'setup_checklist', 'setup_details_changed'} and setup_identity(event.value) != setup_identity(old.value))
                     or event.observed_at <= old.observed_at
                     or (old.event_at and event.event_at and event.event_at <= old.event_at)
                     or (event.source_kind == 'reviewed_seed' and old.source_kind != 'reviewed_seed')):

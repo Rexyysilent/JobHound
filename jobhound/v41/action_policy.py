@@ -504,3 +504,29 @@ def apply_reviewed_outcome_action(canonical: CanonicalJob, assessment: Assessmen
         assessment.action_readiness, assessment.next_action = 'watch', 'verify'
         assessment.next_step = 'Recheck this dated access-restoration evidence before further onboarding.'
         _task(assessment, canonical, 'project_access', assessment.next_step, now)
+        return
+    # Pre-allocation forms are their own checklist, not payment approval or a
+    # work subject. Existing assessment/work/terminal actions above keep priority.
+    from .outcomes import SetupIdentity, SetupChecklist
+    if not any(event.predicate.startswith('setup_') for event in projection.events):
+        return
+    selected_setup = value('setup_selection')
+    checklist = projection.value('setup_checklist', setup=selected_setup) if isinstance(selected_setup, SetupIdentity) else None
+    facts = (projection.facts('setup_selection') + projection.facts('setup_checklist', setup=selected_setup)
+             if isinstance(selected_setup, SetupIdentity) else [])
+    supported = bool(facts) and all(fact.event_at is not None and fact.event_at <= now
+        and (fact.expires_at is None or now < fact.expires_at) for fact in facts)
+    if isinstance(checklist, SetupChecklist) and checklist.state == 'completed' and supported:
+        completion = projection.facts('setup_checklist', setup=selected_setup)[0]
+        label = 'User-reported' if completion.source_kind == 'user_report' else 'Provider-reported'
+        assessment.lifecycle, assessment.lifecycle_reason = 'watch', 'setup_checklist_completed'
+        assessment.action_readiness, assessment.next_action = 'watch', 'await_response'
+        assessment.next_step = f'{label} completion of checklist {checklist.checklist_id}, revision {checklist.revision}; do not repeat the older forms reminder. Payable approval and task allocation remain unconfirmed.'
+        assessment.verification_tasks = []
+        return
+    assessment.lifecycle, assessment.lifecycle_reason = 'active', 'setup_checklist_needs_review'
+    assessment.action_readiness, assessment.next_action = 'verification_needed', 'verify'
+    assessment.next_step = ('Confirm the exact current checklist and its dated completion state before repeating forms; a payment-details-changed notice does not prove completion or payable approval.'
+        if not isinstance(checklist, SetupChecklist) or not supported else
+        f'Review the current pending checklist {checklist.checklist_id}, revision {checklist.revision}; confirm whether it has since been completed before repeating the older reminder.')
+    _task(assessment, canonical, 'setup_checklist', assessment.next_step, now)

@@ -77,6 +77,14 @@ def _description(plain: str | None, markup: str | None) -> str:
                 scoped = _strip_html(markup)
                 if scoped != original:
                     return scoped
+        if CONFIG.v55.enabled:
+            if re.search(r'</?[a-z][^>]*>', plain, re.I):
+                return _strip_html(plain).strip()
+            # A provider's plain-only view still has explicit standalone form
+            # headings. Reuse that boundary without decoding escaped prose
+            # examples into live controls or borrowing a different HTML view.
+            from .document_regions import _without_plain_forms
+            return _without_plain_forms(plain).strip()
         return plain.strip()
     return _strip_html(markup).strip()
 

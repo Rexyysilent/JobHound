@@ -26,19 +26,21 @@ def _form_marker(pattern):
         r'\s*:?(?:\s*</(?:span|strong|b|em)\s*>)*\s*</(?P=block)\s*>|^[ \t]*'+pattern+r'[ \t]*:?[ \t]*$)')
 
 
-def _without_plain_forms(source):
+def _without_plain_forms(source, *, trusted_semantic_closures=False):
     starts = _form_marker(_FORM_START)
-    ends = re.compile('(?:'+_form_marker(_FORM_END).pattern.removeprefix('(?im)')+'|'+re.escape(_CLOSED_FORM)+')', re.I | re.M)
+    semantic_end = '|'+re.escape(_CLOSED_FORM) if trusted_semantic_closures else ''
+    ends = re.compile('(?:'+_form_marker(_FORM_END).pattern.removeprefix('(?im)')+semantic_end+')', re.I | re.M)
     # Embedded JSON-LD may itself contain form markup strings. Those bytes are
     # retained as source payload, but cannot define visible document boundaries.
     scan = re.sub(r'(?is)<(?:script|style|noscript)\b[^>]*>.*?</(?:script|style|noscript)\s*>|<!--.*?-->',
-                  lambda match: match.group() if match.group() == _CLOSED_FORM else ' ' * len(match.group()), source)
+                  lambda match: match.group() if trusted_semantic_closures and match.group() == _CLOSED_FORM else ' ' * len(match.group()), source)
     output, cursor = [], 0
     while True:
         start = starts.search(scan, cursor)
         if start is None:
             output.append(source[cursor:])
-            return ''.join(output).replace(_CLOSED_FORM, '')
+            result = ''.join(output)
+            return result.replace(_CLOSED_FORM, '') if trusted_semantic_closures else result
         end = ends.search(scan, start.end())
         nested = starts.search(scan, start.end())
         if end is None or (nested is not None and nested.start() < end.start()):
@@ -116,4 +118,4 @@ def role_markup(value):
         source=decoded
     parser=_RoleMarkup();parser.feed(source);parser.close()
     if parser.omitted:raise ValueError('role_html_unclosed_control')
-    return _without_plain_forms(''.join(parser.output))
+    return _without_plain_forms(''.join(parser.output), trusted_semantic_closures=True)
