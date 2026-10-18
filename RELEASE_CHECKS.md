@@ -6,8 +6,8 @@ quality or a certification of all security properties.
 
 ## Included implementation
 
-- All **98 Python package modules** from the current implementation are included.
-  After line-ending normalization, 96 have identical source text; two differ
+- All **99 Python package modules** from the current implementation are included.
+  After line-ending normalization, 97 have identical source text; two differ
   only by removal of private project/network references in docstrings. No
   runtime algorithm or security fix is removed for publication.
 - The source includes native community/exact-role readers, attempt and
@@ -43,10 +43,17 @@ quality or a certification of all security properties.
 
 ## Verification
 
-- Public-copy offline suite: **2,273 passed, 1 skipped**. The skipped test needs a
+- Public-copy offline suite: **2,336 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use
   synthetic policy, blank provider credentials and blocked external sockets.
-- The integrated suite includes 93 new payout, dated-language and outbound-event
+- The next bounded batch adds **63** native compensation, equipment and exact-role
+  controls. They cover audio-hour units, separately attributed vendor/approval/
+  payment conditions, dated webcam facts, action-specific prerequisites and
+  exact-URL selection on multi-posting pages. Parent review includes shared
+  optional modifiers, supported webcam alternatives and completed-work controls.
+  Final agent focused runs passed 167 compensation-adjacent, 30 equipment and
+  177 role-boundary-adjacent tests; these overlap with the full suite.
+- The earlier October 18 batch added 93 payout, dated-language and outbound-event
   cases. Bounded agent suites passed 276, 62 and 258 tests respectively; these
   overlap and are not additional independent coverage. Parent review added
   fee-waiver, approved-work-plan, language-modality, evidence-order and profile-
@@ -54,7 +61,7 @@ quality or a certification of all security properties.
   exclude "daily wise payment" from Wise-provider evidence; three native-feed
   integration controls exercise the final engine behavior. No live profile or mailbox
   evidence was imported, and no provider policy or payout guarantee is asserted.
-- A frozen-input comparison of 2,673 canonicals preserved all projected decisions,
+- The earlier payout/language/outbound frozen-input comparison of 2,673 canonicals preserved all projected decisions,
   compensation, blockers and accounting. It uses the captured clock and current
   policy, with external sockets and production stores blocked; it does not
   reconstruct the exact historical delivery or measure recommendation quality.

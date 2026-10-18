@@ -54,6 +54,26 @@ class LanguageEvidence:
             object.__setattr__(self, "event_date", date.fromisoformat(str(self.event_date)).isoformat())
 
 
+@dataclass(frozen=True)
+class EquipmentEvidence:
+    """Explicit inventory evidence; owning a phone never proves webcam support."""
+    device: Literal["webcam", "phone"]
+    available: bool | None
+    evidence_id: str
+    source: str
+    event_date: str | None = None
+
+    def __post_init__(self):
+        if self.device not in {"webcam", "phone"}:
+            raise ValueError("invalid equipment device")
+        if self.available is not None and type(self.available) is not bool:
+            raise ValueError("equipment availability requires a literal boolean or null")
+        if not all(isinstance(v, str) and v.strip() for v in (self.evidence_id, self.source)):
+            raise ValueError("equipment evidence requires id and source")
+        if self.event_date is not None:
+            object.__setattr__(self, "event_date", date.fromisoformat(str(self.event_date)).isoformat())
+
+
 @dataclass
 class Profile:
     languages: set[str]
@@ -83,12 +103,17 @@ class Profile:
     documented_professional_years: dict[str, float] = field(default_factory=dict)
     target_lanes: set[str] = field(default_factory=set)
     language_evidence: list[LanguageEvidence] = field(default_factory=list)
+    equipment_evidence: list[EquipmentEvidence] = field(default_factory=list)
 
     def __post_init__(self):
         # Also restores nested records from immutable RunContext JSON snapshots.
         self.language_evidence = [
             record if isinstance(record, LanguageEvidence) else LanguageEvidence(**record)
             for record in self.language_evidence
+        ]
+        self.equipment_evidence = [
+            record if isinstance(record, EquipmentEvidence) else EquipmentEvidence(**record)
+            for record in self.equipment_evidence
         ]
 
     @classmethod
@@ -150,6 +175,8 @@ class Profile:
             },
             language_evidence=[LanguageEvidence(**record) for record in
                                (cfg.get("language_evidence") or [])],
+            equipment_evidence=[EquipmentEvidence(**record) for record in
+                                (cfg.get("equipment_evidence") or [])],
         )
 
     def claimed_domains(self) -> set[str]:

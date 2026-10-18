@@ -8,7 +8,7 @@ review budgets. Current operation does not depend on completing every item here.
 
 | Area | Current behavior |
 | --- | --- |
-| Evidence and decisions | Native pay/geography, amount-specific payout minima, dated language scopes, source identity, page-type gates, exact roles and actor-scoped community threads |
+| Evidence and decisions | Native pay/geography, amount-specific payout minima, vendor timing conditions, dated language/equipment scopes, exact multi-posting identity, page-type gates, exact roles and actor-scoped community threads |
 | Outcome review | Historical attempts, exact assessment revisions, buyer terms, work allocations, settlement facts and record-only outbound bounces; reviewed-file workflow only |
 | Delivery | Durable per-destination receipts in approved runs; compact handoff signals and reviewed mixed-draft reissue in disposable offline state |
 | Source expansion | Shared HTTP/logical budgets, cadence and adequately covered-check records; readers do not automatically admit new daily sources |

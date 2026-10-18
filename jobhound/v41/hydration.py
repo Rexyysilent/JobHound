@@ -438,7 +438,8 @@ def _check_json_depth(value, *, max_depth=64) -> None:
             pending.extend((child, depth + 1) for child in node)
 
 
-def _jobposting_payload(body: str) -> dict | None:
+def _jobposting_payload(body: str, *, expected_url: str | None = None) -> dict | None:
+    postings = []
     for match in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', body, re.I | re.S):
         try:
             raw = json.loads(unescape(match.group(1)))
@@ -456,7 +457,35 @@ def _jobposting_payload(body: str) -> dict | None:
             if not isinstance(kinds, list) or not all(isinstance(kind, str) for kind in kinds):
                 continue
             if "JobPosting" in kinds:
-                return node
+                if expected_url is None:
+                    return node
+                postings.append(node)
+    if expected_url is None or not postings:
+        return None
+
+    def role_url(value):
+        # Only an explicit role URL binds a multi-posting document. Titles and
+        # arbitrary identifiers cannot establish ownership of the fetched leaf.
+        if isinstance(value, dict):
+            value = value.get('@id')
+        if not isinstance(value, str) or not value.strip():
+            return None
+        resolved = urljoin(expected_url, value)
+        if not _safe_public_http(resolved):
+            return None
+        parts = urlsplit(resolved)
+        # Query parameters may carry native role IDs; never strip tracking-like
+        # names or borrow a JSON-LD @base when establishing role ownership.
+        return (parts.scheme.casefold(), parts.netloc.casefold(), parts.path.rstrip('/'), parts.query)
+
+    expected = role_url(expected_url)
+    matching = [node for node in postings if role_url(node.get('url')) == expected]
+    if len(matching) == 1:
+        return matching[0]
+    # Keep the historical single-posting contract when the publisher gives no
+    # explicit URL. Explicit foreign URLs and ambiguous identities stay partial.
+    if len(postings) == 1 and not matching and 'url' not in postings[0]:
+        return postings[0]
     return None
 
 
@@ -685,7 +714,7 @@ def _parse_posting_response(response, *, source, public, request_url, posting_id
             native=parse_native_role(response.text,public,original,
                 captured_at=cached_at if cached else datetime.now(timezone.utc),from_cache=bool(cached))
             if native is not None:return native
-        payload = _jobposting_payload(response.text)
+        payload = _jobposting_payload(response.text, expected_url=public if CONFIG.v55.enabled else None)
         if payload is None:
             return HydrationResult(state="partial", source=source, request_url=request_url, public_url=public, error="jobposting_not_found")
         hydrated = _generic_job(payload, public, response.text)

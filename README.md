@@ -120,6 +120,10 @@ fixed project amount, rather than treating a payment-method logo as feasibility.
 Reviewed [outbound observations](docs/outbound_outcomes.md) preserve bounces and
 alternate sends without counting them as buyer replies or verified contacts.
 
+[Compensation conditions, equipment and exact-role checks](docs/handoff_boundaries.md)
+keep vendor pace separate from wages, make webcam compatibility explicit, and
+prevent sibling records on a page from supplying another role's requirements.
+
 Delivered job status updates use compact Watch, Historical Lead, Closed or Skip
 entries with the reason and next step. Parked leads no longer look like fresh
 Verify cards. Active cards retain their full detail, and status updates do not

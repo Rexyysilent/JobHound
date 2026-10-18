@@ -163,6 +163,7 @@ class RequirementsAssessment(BaseModel):
     experience_evidence_state: str = "unknown"
     field_coverage: dict[str, str] = Field(default_factory=dict)
     profile_language_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    equipment_compatibility: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RoleAssessment(BaseModel):
