@@ -613,7 +613,8 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
         return stage_handoff_signals(outbox, result, destinations, now=now,
                                      card_cap=card_cap, status_cap=status_cap)
     if outbox.conn.execute('''SELECT 1 FROM delivery_subjects s JOIN delivery_revisions r ON r.id=s.revision
-        WHERE s.workspace=? AND s.profile=? AND json_extract(r.material,'$.schema')='jobhound-material-action/v2'
+        WHERE s.workspace=? AND s.profile=? AND json_extract(r.material,'$.schema') IN
+        ('jobhound-material-action/v2','jobhound-material-action/v3')
         LIMIT 1''', (outbox.workspace, outbox.profile)).fetchone():
         raise ValueError('restore the pre-handoff review database before returning to legacy delivery')
     from .v41.digest import build_digest, release_order_key

@@ -8,7 +8,8 @@ import json
 
 from .review_audit import canonical_json, material_projection
 
-MATERIAL_SCHEMA = 'jobhound-material-action/v2'
+MATERIAL_SCHEMA = 'jobhound-material-action/v3'
+LEGACY_MATERIAL_SCHEMA = 'jobhound-material-action/v2'
 SIGNAL_SCHEMA = 'jobhound-handoff-signal/v1'
 
 
@@ -75,8 +76,8 @@ def selected_outcome_facts(raw):
             'conflicts': sorted(key for key in projection.conflicts if key in keys)}
 
 
-def handoff_material_projection(row):
-    """Versioned material semantics; excludes capture, scores and reminder clocks."""
+def handoff_material_projection_v2(row):
+    """Frozen v2 semantics for validating an immutable previously accepted payload."""
     base = material_projection(row)
     base.pop('scoped_outcomes')
     assessment = row['assessment']
@@ -86,9 +87,22 @@ def handoff_material_projection(row):
     work = ({key: plan.get(key) for key in ('authority', 'target', 'attempt_scope',
         'prerequisites', 'terms', 'next_action_cost', 'read_only', 'next_action')}
         if isinstance(plan, dict) else None)
-    return json.loads(canonical_json({'schema': MATERIAL_SCHEMA, 'opening': base,
+    return json.loads(canonical_json({'schema': LEGACY_MATERIAL_SCHEMA, 'opening': base,
         'selected_outcomes': selected_outcome_facts(row.get('outcome_projection')),
         'buyer_terms': buyer, 'work_action': _native_value(work)}))
+
+
+def handoff_material_projection(row):
+    """Semantic buyer revisions exclude changing support lists and capture metadata."""
+    material = handoff_material_projection_v2(row)
+    material['schema'] = MATERIAL_SCHEMA
+    terms = []
+    for value in material['buyer_terms']:
+        if not isinstance(value, dict) or not {'state', 'revision_id'} <= value.keys():
+            raise ValueError('invalid_buyer_terms_material')
+        terms.append({key: value[key] for key in ('state', 'revision_id')})
+    material['buyer_terms'] = terms
+    return material
 
 
 def _baseline_state(outbox, identity, target, revision, row, *, now):
@@ -114,6 +128,8 @@ def _baseline_state(outbox, identity, target, revision, row, *, now):
         return 'delivered'
     if material.get('schema') == MATERIAL_SCHEMA:
         return 'changed'
+    if material.get('schema') not in {None, LEGACY_MATERIAL_SCHEMA}:
+        return 'migration_review_required'
     proofs = outbox.conn.execute('''SELECT i.id,i.payload FROM delivery_intents i
         WHERE i.revision=? AND i.channel=? AND i.destination=? AND i.status='accepted'
         AND EXISTS(SELECT 1 FROM delivery_attempt_events e WHERE e.intent=i.id AND e.event='accepted')''',
@@ -125,7 +141,10 @@ def _baseline_state(outbox, identity, target, revision, row, *, now):
             # never a resend or a failure of unrelated subjects in the run.
             if not isinstance(previous,dict) or 'outcome_projection' not in previous:
                 continue
-            if material_projection(previous)!=material:
+            prior_projection = (handoff_material_projection_v2(previous)
+                                if material.get('schema') == LEGACY_MATERIAL_SCHEMA
+                                else material_projection(previous))
+            if prior_projection != material:
                 continue
             prior_material=handoff_material_projection(previous)
         except (ValueError,TypeError,KeyError,AttributeError):

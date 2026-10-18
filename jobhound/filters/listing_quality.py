@@ -375,8 +375,26 @@ def location_gate(is_remote: bool, region_tags: list[str],
         line.strip() for line in (description or "")[:1200].splitlines()
         if re.search(r"\b(?:location|workplace|work location)\s*:", line, re.I)
     )
+    # Native role pages also state attendance in ordinary sentences, without a
+    # "Location:" label. Bind only explicit role/worker obligations; company
+    # offices, optional visits and negated attendance do not establish onsite.
+    role_onsite = re.findall(
+        r'(?:^|[.!?;\n])\s*(?:'
+        r'(?:this|the)\s+(?:role|position|job)\s+(?:is|will\s+be)\s+'
+        r'(?:(?:fully|strictly|entirely)\s+)?(?:on[- ]?site|in[- ]office|office[- ]based)\b|'
+        r'(?:on[- ]?site|in[- ]office)\s+attendance\s+(?:is\s+)?(?:required|mandatory)\b|'
+        r'(?:you|applicants|candidates)\s+must\s+work\s+(?:on[- ]?site|in[- ]office)\b)[^.!?;\n]*',
+        description or '', re.I,
+    )
+    # Keep the matched clause's modality rather than just its onsite prefix.
+    # A separate later sentence about remote company teams has no such authority.
+    role_onsite = [clause for clause in role_onsite if not re.search(
+        r'\b(?:on[- ]?site|in[- ]office|office[- ]based)'
+        r'(?:\s+in\s+[^,;.!?\n]{1,40})?\s+or\s+(?:fully\s+)?remote\b|'
+        r'\b(?:on[- ]?site|in[- ]office|office[- ]based)(?:\s+attendance|\s+visits?)?'
+        r'\s+(?:is\s+)?optional(?:ly)?\b', clause, re.I)]
     explicit_text = _EXCLUSION_CLAUSE.sub(
-        "", f"{normalized_location}\n{normalized_title}\n{location_lines}")
+        "", f"{normalized_location}\n{normalized_title}\n{location_lines}\n" + '\n'.join(role_onsite))
     if _EXPLICIT_ONSITE.search(explicit_text):
         return ["rejected_location:onsite_or_hybrid"]
     if _FOREIGN_LOCATION.search(explicit_text) and not _INDIA_LOCATION.search(explicit_text):

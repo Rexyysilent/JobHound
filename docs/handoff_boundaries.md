@@ -74,3 +74,27 @@ pages stay incomplete. The existing single-posting fallback without an explicit
 URL still goes through the original identity guards. An India-filtered index
 does not establish eligibility for every linked role, and a survey does not
 establish assignment or paid work.
+
+
+## Native boundaries and delivery material
+
+Standalone application-form headings with a reliable submit/end marker or a
+closed HTML/ARIA form are excluded from role interpretation. Missing or nested
+boundaries remain uncertain; native hydration reports partial evidence. Genuine
+requirements and closure notices after a form remain effective. This is bounded
+template handling, not a universal plain-text form classifier.
+
+Explicit mandatory onsite role statements override broad remote metadata.
+Clause-local remote alternatives and optional attendance remain distinct from
+mandatory attendance. Broad data/programming profile domains do not establish
+data-science or competitive-programming expert qualifications; explicit matching
+domain claims still use the normal assessment path.
+
+Delivery material v3 excludes support-only buyer post lists from the action
+fingerprint while retaining semantic revision identity and selected pay. A
+buyer acknowledgment cannot reissue an unchanged opportunity. Existing v2
+baselines are adopted only after their exact stored material is proven from
+an accepted payload for that destination. Missing or mismatched proof requires
+review. Adoption creates no send or acceptance receipt; genuine scope/pay changes
+remain material. Saved native community-thread v2 evidence is unchanged, and
+legacy delivery rollback still requires a pre-handoff database backup.
