@@ -130,7 +130,7 @@ Verify cards. Active cards retain their full detail, and status updates do not
 count toward the subject's job-card total. Previously accepted emails stay frozen.
 
 A job listing is only the first step. v5.7 adds scoped outcome facts:
-applications, assessments, rejections, buyer replies and access changes.
+applications, setup checklists, assessments, rejections, buyer replies and access changes.
 
 - **Scoped, not global.** A rejection closes that application, not the whole
   company. An access block applies to that project, not every project on the
@@ -148,6 +148,9 @@ reviewed files. It never reads a mailbox or writes to production stores.
 Review now keeps historical application attempts, assessment revisions and
 work allocations separately. One active attempt supplies the next action;
 approvals for another assessment revision or allocation do not carry over.
+A completed setup checklist retains its user-reported provenance and stops old
+forms reminders; it does not establish payable approval or task allocation.
+Explicit reviewed no-AI work terms stay visible as manual-work guidance.
 Agreed terms, delivered work, acceptance, invoice, settlement and received
 payment remain different facts. Public suitability blockers still veto an
 application or work action.

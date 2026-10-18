@@ -43,10 +43,17 @@ quality or a certification of all security properties.
 
 ## Verification
 
-- Public-copy offline suite: **2,422 passed, 1 skipped**. The skipped test needs a
+- Public-copy offline suite: **2,471 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use
   synthetic policy, blank provider credentials and blocked external sockets.
-- The current native-boundary batch adds **69** controls for plain/visible form
+- The closure-reconciliation batch adds **49** native/reviewed-input controls.
+  Provider plain descriptions respect explicit form boundaries; untrusted raw
+  comments cannot forge semantic form endings. Selected setup checklists retain
+  user-reported completion separately from allocation/payable approval. Explicit
+  reviewed no-AI work terms remain visible for active and completed work.
+  Legacy event serialization and unrelated selected work/assessment actions are
+  preserved. All 49 controls run in the combined offline suite.
+- The earlier native-boundary batch adds **69** controls for plain/visible form
   exclusion, explicit onsite and specialist requirements, cross-capture buyer
   history, and proof-gated delivery material v2-to-v3 adoption. Saved native
   thread v2 evidence remains compatible. All 69 run through the combined suite.
@@ -109,7 +116,7 @@ private files that must stay excluded; scan the exact staging set before future
 pushes. No scanner can recognize every unknown secret.
 
 Independent recommendation precision/retention, expanded source effectiveness,
-authenticated live outcome integration and selected specification gaps remain
+authenticated live outcome integration and bounded parser capabilities remain
 explicit in [the roadmap](docs/ROADMAP.md). They do not prevent an already
 configured daily digest or the keyless local workflow from running.
 

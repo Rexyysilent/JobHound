@@ -81,6 +81,8 @@ def apply_reviewed_work_action(canonical, assessment, now: datetime):
             _task(assessment, canonical, fact, instruction, now)
 
     def finish(action, instruction, *, ready=False, read_only=False, reason='reviewed_existing_work'):
+        if (plan.get('terms') or {}).get('ai_assistance') == 'prohibited':
+            instruction += ' Assigned-task terms prohibit AI assistance; manual task work only.'
         plan.update(next_action=action, read_only=read_only)
         assessment.lifecycle = 'watch' if read_only or not ready else 'active'
         assessment.lifecycle_reason = reason
@@ -101,6 +103,9 @@ def apply_reviewed_work_action(canonical, assessment, now: datetime):
     # Missing email is never nonpayment. Historical receipts never forecast cash.
     financial = any(projection.facts(p, work=work) for p in ('invoice', 'collected_payment'))
     completed = bool(projection.facts('work_state', work=work))
+    terms = value('work_terms')
+    if isinstance(terms, WorkTerms) and terms.ai_assistance is not None:
+        plan['terms'] = terms.model_dump()
     if financial or completed:
         assessment.verification_tasks = []
         for key in conflicts:
@@ -136,7 +141,6 @@ def apply_reviewed_work_action(canonical, assessment, now: datetime):
     for predicate, required in expected.items():
         if value(predicate) != required or not known(predicate):
             check(predicate, f'Confirm current {predicate.replace("_", " ")} for {label}; another allocation or a completed assessment does not establish it.')
-    terms = value('work_terms')
     if isinstance(terms, WorkTerms):
         plan['terms'] = terms.model_dump()
     if not isinstance(terms, WorkTerms) or not known('work_terms', fresh=False):

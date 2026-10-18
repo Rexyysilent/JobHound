@@ -9,7 +9,7 @@ review budgets. Current operation does not depend on completing every item here.
 | Area | Current behavior |
 | --- | --- |
 | Evidence and decisions | Native pay/geography, amount-specific payout minima, vendor timing conditions, dated language/equipment scopes, exact multi-posting identity, page-type gates, exact roles and actor-scoped community threads |
-| Outcome review | Historical attempts, exact assessment revisions, buyer terms, work allocations, settlement facts and record-only outbound bounces; reviewed-file workflow only |
+| Outcome review | Historical attempts, selected setup checklists, exact assessment revisions, buyer terms, work allocations with explicit no-AI restrictions, settlement facts and record-only outbound bounces; reviewed-file workflow only |
 | Delivery | Durable per-destination receipts in approved runs; compact handoff signals and reviewed mixed-draft reissue in disposable offline state |
 | Source expansion | Shared HTTP/logical budgets, cadence and adequately covered-check records; readers do not automatically admit new daily sources |
 | Local workflow | Named profiles, isolated data directories, `local doctor`, fictional demo, reviewed-file commands and closed-state backup/restore |
@@ -26,14 +26,14 @@ example is complete. See [the change summary](CHANGES.md) and
 
 | Work | Completion condition |
 | --- | --- |
-| Remaining source-specific behavior | Original-source outcome reconciliation, cross-capture buyer closure/edit history, unfamiliar employer templates/plain-text form segmentation and other source-specific partial cases. Exact same-observation payout minima, optional dated language declarations and reviewed message/contact-scoped bounce facts are implemented; unknown terms and unauthenticated inputs remain explicit. Native Turing/micro1 roles, V5.5 ATS HTML feeds and generic JobPosting hydration exclude explicit application controls from role evidence. Selected-step completion and private buyer negotiation have existing reviewed-input controls. No new competition score is required for current private negotiation. |
-| Independent recommendation quality | Freeze at least 100 independently labeled records with 20 actionable positives; measure at least 95% Primary precision, 90% positive retention, 80% displayed Verify usefulness, zero known critical leaks and complete material-claim support. Retain three independent complete frozen live-shadow captures without production notifications or database writes. |
+| Bounded extraction and evidence limits | The original reviewed-file/native mechanism audit covers all 48 specified cases with synthetic controls and disclosed limits. Explicit HTML/plain form boundaries, native cross-capture buyer history and selected-step/setup reconciliation are implemented. Original historical captures remain unauthenticated; arbitrary undelimited templates and graphics are unsupported. These are capability/evidence limits, not claims of complete platform coverage. |
+| Independent recommendation quality (deferred) | No independently reviewed labels are available; human labeling is deferred. This gate is not satisfied. Future condition: freeze at least 100 independently labeled records with 20 actionable positives; measure at least 95% Primary precision, 90% positive retention, 80% displayed Verify usefulness, zero known critical leaks and complete material-claim support. Retain three independent complete frozen live-shadow captures without production notifications or database writes. |
 | Expanded source effectiveness | For each claimed source/route, report adequately covered bounded checks, unique actionable yield, duplicates, review effort and native costs; partial/failed retrieval remains missing coverage |
 | Live outcome integration | Review an authenticated outcome stream and channel mapping, then verify scoped transitions, uncertain receipt reconciliation and settlement evidence before enabling production use |
 | Interactive onboarding | A profile wizard that records supported operator facts rather than inventing qualifications |
 | Licensed/versioned distribution | Owner-selected license and an explicitly verified release artifact |
 
-The first four rows do **not** block the existing daily digest. They limit which
+The first four rows do **not** block the existing daily digest or the reviewed-file workflow. They limit which
 additional capabilities and quality claims are justified. The public starter
 still needs the user's own profile, source choices and provider configuration
 before live operation.
