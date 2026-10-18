@@ -17,6 +17,17 @@ _MINIMUM = re.compile(
 _CURRENCIES = {'$': 'USD', '€': 'EUR', '£': 'GBP'}
 
 
+def _provider_mention(clause, method):
+    if method.group().casefold() != 'wise':
+        return True
+    left, right = clause[:method.start()], clause[method.end():]
+    # "day wise payment" is a cadence expression, not a provider name.
+    if re.search(r'\b(?:daily|days?|hours?|months?|tasks?|weeks?|weekly|monthly|projects?|pieces?)\s*[- ]\s*$', left, re.I):
+        return False
+    return bool(re.search(r'\b(?:via|through|using|by)\s*$|\b(?:payment|payout)\s+methods?\s*:\s*$', left, re.I)
+                or re.match(r'\s+(?:payouts?|payments?)\b', right, re.I))
+
+
 def apply_payout_constraints(canonical, assessment, now):
     """Keep terms bound to the observation supplying this project's pay."""
     selected = assessment.selected_pay
@@ -34,7 +45,7 @@ def apply_payout_constraints(canonical, assessment, now):
     # Deliberately narrow: a method and its condition must share one clause.
     # Commas separate alternate rails; decimal punctuation stays intact.
     for clause in re.split(r'[;\n]|,(?!\d)|\.(?=\s|$)', observation.job.description):
-        methods = list(_METHOD.finditer(clause))
+        methods = [m for m in _METHOD.finditer(clause) if _provider_mention(clause, m)]
         if not methods or not _CONTEXT.search(clause):
             continue
         for method in methods:

@@ -43,15 +43,21 @@ quality or a certification of all security properties.
 
 ## Verification
 
-- Public-copy offline suite: **2,258 passed, 1 skipped**. The skipped test needs a
+- Public-copy offline suite: **2,273 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use
   synthetic policy, blank provider credentials and blocked external sockets.
-- The integrated suite includes 78 new payout, dated-language and outbound-event
+- The integrated suite includes 93 new payout, dated-language and outbound-event
   cases. Bounded agent suites passed 276, 62 and 258 tests respectively; these
   overlap and are not additional independent coverage. Parent review added
   fee-waiver, approved-work-plan, language-modality, evidence-order and profile-
-  reuse controls before the combined suite ran. No live profile or mailbox
+  reuse controls before the combined suite ran. Paired cadence/provider tests
+  exclude "daily wise payment" from Wise-provider evidence; three native-feed
+  integration controls exercise the final engine behavior. No live profile or mailbox
   evidence was imported, and no provider policy or payout guarantee is asserted.
+- A frozen-input comparison of 2,673 canonicals preserved all projected decisions,
+  compensation, blockers and accounting. It uses the captured clock and current
+  policy, with external sockets and production stores blocked; it does not
+  reconstruct the exact historical delivery or measure recommendation quality.
 - Status presentation, transport, ranking breadth and handoff checks: **155
   passed**, including seven status regressions. Parked updates are compact;
   active cards and completed-step advice remain intact, and rendering does not

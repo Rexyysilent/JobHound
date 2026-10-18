@@ -136,6 +136,27 @@ def test_no_terms_preserves_existing_engine_behavior():
     assert item.decision.next_action == 'apply'
 
 
+@pytest.mark.parametrize('cadence', ['daily', 'day', 'hour', 'month', 'task', 'day-', 'weekly'])
+def test_cadence_wise_payment_does_not_invent_provider(cadence):
+    item = evaluate(amount='USD 10 per working hour',
+                    terms=f'Work from home with {cadence} wise payment option.')
+    assert item.assessment.payout_feasibility == {}
+    assert not any(u.startswith('payout_feasibility:') for u in item.assessment.unresolved)
+    assert item.decision.next_action == 'apply'
+
+
+@pytest.mark.parametrize('terms', ['Paid via Wise.', 'Paid via wise.',
+    'Payment methods: wise.', 'Wise payout has no minimum.',
+    'wise payout requires amount above USD 50.'])
+def test_explicit_wise_provider_context_survives_case_insensitively(terms):
+    view = evaluate(terms=terms).assessment.payout_feasibility
+    assert view['routes'][0]['method'] == 'wise'
+    if 'no minimum' in terms:
+        assert view['state'] == 'amount_compatible'
+    if 'above' in terms:
+        assert view['state'] == 'single_amount_infeasible'
+
+
 def test_closed_listing_retains_closure_despite_historical_payout_terms():
     row = observation(vacancy_state='explicitly_closed')
     row.job.pay_raw = 'USD 18 fixed project budget'

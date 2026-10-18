@@ -11,6 +11,7 @@ span, observation identity, currency, comparison and result. Payout thresholds
 remain source evidence rather than worker wages. Missing amounts, hourly rates,
 unknown or mismatched currencies and ambiguous conditions stay unknown. Fee
 waivers, tier thresholds and bonuses do not establish a payout minimum.
+Cadence phrases such as "daily wise payment" do not name the Wise payment service.
 
 An explicitly evidenced compatible alternate route can satisfy the amount check.
 Another posting's terms, a payment logo, hypothetical future work and an assumed
