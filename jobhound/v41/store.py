@@ -163,17 +163,91 @@ class V41Store:
         ).fetchone()
         return row is not None
 
+    def _receipt_identity_matches(self, row: sqlite3.Row, item: EvaluatedJob) -> bool:
+        """Require unambiguous identity evidence from the actual delivered run.
+
+        The old ID erased Unicode and omitted the posting URL. Neither that
+        hash nor the mutable ``canonical_jobs`` row proves what was delivered.
+        Use the immutable observations linked to this specific receipt instead.
+        """
+        from ..models import Job
+        from .provenance import _norm, counterparty_key, public_url
+
+        def identity(job: Job) -> tuple[str, str, str]:
+            return counterparty_key(job), _norm(job.title), _norm(job.location)
+
+        expected = identity(item.job)
+        posting_url = public_url(row["canonical_url"])
+        identities = set()
+        observations = self.conn.execute(
+            """SELECT o.normalized_url, o.normalized_job_json
+               FROM job_observations j LEFT JOIN observations o
+                 ON o.run_id=j.run_id AND o.observation_id=j.observation_id
+               WHERE j.run_id=? AND j.canonical_id=?""",
+            (row["run_id"], row["canonical_id"]),
+        )
+        for observation in observations:
+            try:
+                job = Job.model_validate_json(observation["normalized_job_json"])
+            except (TypeError, ValueError):
+                # Incomplete historical evidence cannot justify suppression.
+                return False
+            if public_url(observation["normalized_url"] or job.url) == posting_url:
+                identities.add(identity(job))
+        return identities == {expected}
+
+    def _legacy_delivered(self, item: EvaluatedJob) -> sqlite3.Row | None:
+        """Read a successful old-ID receipt for this exact posting, if proven.
+
+        No aliases or historical rows are rewritten. A failed new-ID scrape
+        cannot displace this baseline before the replacement notification is
+        successfully delivered.
+        """
+        from .models import PayCandidate
+        from .provenance import public_url
+
+        legacy_id = item.canonical.legacy_canonical_id
+        url = public_url(item.job.url)
+        if not legacy_id or legacy_id == item.canonical.canonical_id or not url:
+            return None
+        rows = self.conn.execute(
+            """SELECT r.* FROM run_jobs r JOIN notification_events n
+                 ON n.run_id=r.run_id AND n.canonical_id=r.canonical_id
+               WHERE n.success=1 AND r.canonical_id=?
+               ORDER BY n.ts DESC, n.id DESC""",
+            (legacy_id,),
+        )
+        for row in rows:
+            try:
+                ActionBand(row["action_band"])
+                pay = json.loads(row["selected_pay_json"] or "null")
+                if pay is not None:
+                    PayCandidate.model_validate(pay)
+            except (TypeError, ValueError):
+                # Corrupt historical facts cannot become a new baseline.
+                continue
+            if (public_url(row["canonical_url"]) == url
+                    and self._receipt_identity_matches(row, item)):
+                return row
+        return None
+
     def annotate_transitions(self, result: RunResult) -> list[EvaluatedJob]:
         """Set deterministic notification transitions before persistence."""
         if result.metadata.engine_version == 'v5.0.0-rc1':
             return self._release_transitions(result)
         notifiable: list[EvaluatedJob] = []
         for item in result.evaluated:
+            item.decision.notification_transition = "none"
             if item.decision.action_band == ActionBand.REJECT:
                 continue
             previous = self._previous(item.canonical.canonical_id)
+            was_notified = self._was_notified(item.canonical.canonical_id)
+            if not was_notified:
+                delivered = self._legacy_delivered(item)
+                if delivered is not None:
+                    previous, was_notified = delivered, True
             transition = "none"
-            if previous is None or not self._was_notified(item.canonical.canonical_id):
+            if previous is None or not was_notified:
                 transition = "new"
             elif (
                 previous["action_band"] == ActionBand.VERIFY.value

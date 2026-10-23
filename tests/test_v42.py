@@ -426,15 +426,17 @@ def test_automation_has_a_reserved_digest_section():
     assert digest.accounting_ok
 
 
-def test_exact_public_url_collapses_even_when_company_labels_differ():
+def test_exact_public_url_does_not_merge_unrelated_company_labels():
     url = "https://jobs.example.com/posting/one?utm_source=a"
     result = evaluate_raw([
         _jsearch("Bengali AI Evaluator", "Company A", _requirements(), url=url),
         _jsearch("Bengali AI Evaluator", "Company B", _requirements(), url=url),
     ], as_of=AS_OF)
-    assert len(result.evaluated) == 1
-    assert len(result.evaluated[0].canonical.observations) == 2
-    assert result.counts["duplicate_observations_collapsed"] == 1
+    assert len(result.evaluated) == 2
+    assert {item.job.company for item in result.evaluated} == {"Company A", "Company B"}
+    assert len({item.canonical.canonical_id for item in result.evaluated}) == 2
+    assert all(len(item.canonical.observations) == 1 for item in result.evaluated)
+    assert result.counts["duplicate_observations_collapsed"] == 0
 
 
 def test_closed_page_body_is_detected():
