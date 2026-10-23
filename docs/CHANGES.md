@@ -1,5 +1,24 @@
 # Current implementation changes
 
+## October 23, 2026: preserve distinct posting identities
+
+- Replace fuzzy cross-posting collapse in V3 and default V4.2 with explicit
+  posting identity; preserve separate requisitions and applicant locations.
+- Retain meaningful URL query/path differences and Unicode names, including
+  Bengali text and distinct C++/C# specialisms. Deterministic selection no longer
+  depends on input order or acquisition timestamps.
+- Give V4.2 URL-bound IDs and preserve successful old notifications only when
+  immutable receipt-linked evidence proves the same posting. Failed sends,
+  conflicting identities and incomplete history do not establish that proof.
+- Add synthetic pipeline, replay, storage and receipt regressions. Existing
+  duplicate/conflict controls now supply the posting identity or accepted
+  original-page lineage they depend on.
+
+See [identity rules and migration boundaries](opportunity_identity.md), including
+the V3 resurfacing and V5.5/outbox compatibility limits.
+
+## Earlier implementation
+
 - Reconcile selected pre-allocation setup checklists: preserve user completion,
   suppress obsolete reminders and keep payable/allocation status unconfirmed.
 - Preserve explicit reviewed no-AI restrictions in assigned-work instructions

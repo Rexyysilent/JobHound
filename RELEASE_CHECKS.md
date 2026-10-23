@@ -37,11 +37,28 @@ quality or a certification of all security properties.
   separately. Positive tests opt into those policies; a blank starter also
   initializes and runs the demo without inventing qualifications.
 - Local state/profile/review/backup paths and workspace markers are ignored and
-  rejected by the publication checker. Exceptions apply only to **39 individually
+  rejected by the publication checker. Exceptions apply only to **45 individually
   reviewed, path/full-line-hash-bound** synthetic security strings and literal API
   placeholders. Exact configured private values can never be waived.
 
 ## Verification
+
+### October 23, 2026: posting identity
+
+- Pristine public `main` baseline: **2,470 passed, 2 skipped**.
+- Updated offline suite: **2,619 passed, 2 skipped** on Python 3.12. The change
+  adds **149 regression cases** across legacy deduplication, modern
+  canonicalization, pipeline/replay retention and immutable receipt compatibility.
+  Targeted test-first runs reproduced the old failures; positive controls retain
+  confirmed duplicates and accepted original-page lineage.
+- Acceptance adapter and evaluator: **100 cases, 204 assertions passed**.
+- All inputs are synthetic, provider sockets are blocked, and notification
+  history tests use disposable SQLite stores. These results do not establish
+  live-provider coverage or real inbox delivery.
+- See [posting identity and migration boundaries](docs/opportunity_identity.md)
+  before updating a stored installation.
+
+### Earlier release verification
 
 - Public-copy offline suite: **2,471 passed, 1 skipped**. The skipped test needs a
   historical live-review cache that is deliberately not distributed. Tests use

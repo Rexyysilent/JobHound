@@ -82,7 +82,9 @@ def _pair():
               company="Appen", url="https://jobs.lever.co/appen/x",
               description="short")
     agg = Job(source="remotive", title="AI Trainer – Bengali",
-              company="Appen", url="https://remotive.com/jobs/123",
+              # A copy must carry the same original posting link; a similar
+              # company/title on an unrelated board URL is not identity proof.
+              company="Appen", url="https://jobs.lever.co/appen/x?utm_source=example",
               description="a much longer aggregator copy of the same posting " * 5,
               pay_raw="$10/hr")
     return ats, agg

@@ -4,11 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
-from rapidfuzz import fuzz
 
 from ..config import CONFIG
 from ..filters.listing_quality import (
@@ -333,9 +332,27 @@ def build_observations(
     return observations, failures
 
 
-def _norm(value: str | None) -> str:
+def _legacy_norm(value: str | None) -> str:
+    """Reproduce pre-migration identity exactly; never use it to merge rows."""
     folded = normalize_match(value or "").casefold()
     return re.sub(r"[^a-z0-9]+", " ", folded).strip()
+
+
+def _norm(value: str | None) -> str:
+    """Normalize names without erasing languages or technical specialisms.
+
+    Keep the previous result for ordinary ASCII names, but retain Unicode
+    letters/marks, Indic joiners and the meaningful symbols in C++ and C#.
+    Display normalization supplies NFC and preserves Bengali conjunct forms.
+    """
+    folded = normalize_match(value or "").casefold()
+    text = "".join(
+        character if character.isalnum()
+        or unicodedata.category(character).startswith("M")
+        or character in "+#\u200c\u200d" else " "
+        for character in folded
+    )
+    return re.sub(r"\s+", " ", text).strip()
 
 
 _COMPANY_ALIASES = {
@@ -343,8 +360,8 @@ _COMPANY_ALIASES = {
 }
 
 
-def _norm_company(value: str | None) -> str:
-    normalized = _norm(value)
+def _norm_company(value: str | None, *, legacy: bool = False) -> str:
+    normalized = _legacy_norm(value) if legacy else _norm(value)
     return _COMPANY_ALIASES.get(normalized, normalized)
 
 
@@ -362,6 +379,11 @@ def _marketplace_counterparty(job: Job, platform_key: str) -> str | None:
 
 def counterparty_key(job: Job) -> str:
     """Stable identity shared by clustering, trust and digest caps."""
+    return _counterparty_key(job)
+
+
+def _counterparty_key(job: Job, *, legacy: bool = False) -> str:
+    """Keep old company/domain fallback available for receipt lookup only."""
     if job.source == 'community_thread':
         return 'community-request:' + public_url(job.url)
     platform_key = job.platform_key or default_matcher().match(job.company)
@@ -370,7 +392,7 @@ def counterparty_key(job: Job) -> str:
         if marketplace_key:
             return marketplace_key
         return f"registry:{platform_key}"
-    company = _norm_company(job.company)
+    company = _norm_company(job.company, legacy=legacy)
     if company:
         return f"company:{company}"
     company_domain = _domain(
@@ -387,23 +409,28 @@ def counterparty_key(job: Job) -> str:
     return f"listing:{host}:{path}"
 
 
-def _compatible(a: ListingObservation, b: ListingObservation) -> bool:
-    if a.job is None or b.job is None:
-        return False
-    company_a, company_b = (
-        _norm_company(a.job.company), _norm_company(b.job.company)
-    )
-    if not company_a or company_a != company_b:
-        return False
-    if fuzz.token_sort_ratio(_norm(a.job.title), _norm(b.job.title)) < 90:
-        return False
-    loc_a, loc_b = _norm(a.job.location), _norm(b.job.location)
-    if loc_a and loc_b and loc_a != loc_b and not (a.job.is_remote and b.job.is_remote):
-        return False
-    return True
+def _observation_content_key(observation: ListingObservation) -> str:
+    """Break quality ties using evidence, not the record's capture position.
+
+    Observation IDs include the index in a provider batch. Keep those IDs and
+    their provenance links intact, but do not let them select between different
+    descriptions of the same posting. Acquisition timestamps likewise cannot
+    change the winner when the provider content is unchanged. Work-arrangement
+    evidence is derived from the job/payload and contains positional IDs.
+    """
+    payload = observation.model_dump(mode="json", exclude={
+        "observation_id": True,
+        "parent_observation_ids": True,
+        "captured_at": True,
+        "verified_open_at": True,
+        "work_arrangement": True,
+        "job": {"id", "seen_on"},
+    })
+    content = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _observation_quality(observation: ListingObservation) -> tuple[int, int, int, float]:
+def _observation_quality(observation: ListingObservation) -> tuple[int, int, int, float, str, str]:
     job = observation.job
     assert job is not None
     return (
@@ -411,6 +438,7 @@ def _observation_quality(observation: ListingObservation) -> tuple[int, int, int
         1 if job.pay_raw else 0,
         len(job.description or ""),
         observation.source_confidence,
+        _observation_content_key(observation),
         observation.observation_id,
     )
 
@@ -420,93 +448,77 @@ def _canonical_id(job: Job, identity_key: str) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
 
 
+def _legacy_canonical_id(job: Job) -> str:
+    """The actual historical V4.2 key, including old company-name fallback.
+
+    For example, a Bengali employer name used to disappear under ASCII-only
+    normalization and fall back to the listing host/path. A modern company key
+    must not be mislabeled as that historical identity during migration.
+    """
+    identity = "|".join((
+        _legacy_norm(job.title), _counterparty_key(job, legacy=True),
+        _legacy_norm(job.location),
+    ))
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+
+
 def canonicalize_observations(
     observations: list[ListingObservation],
 ) -> list[CanonicalJob]:
+    """Group exact posting observations while retaining independent openings.
+
+    A similar title or a shared remote label cannot establish that two roles
+    are the same requisition. Both decision policies use counterparty, exact
+    normalized title/location and the public URL. Only accepted original-page
+    lineage can join different posting keys. This also means an unknown
+    location does not silently inherit an unrelated record's country.
+    """
     valid = [observation for observation in observations if observation.job is not None and observation.origin != 'account_state']
-    if CONFIG.v55.enabled:
-        valid.sort(key=lambda observation: observation.observation_id)
     clusters: list[list[ListingObservation]] = []
-    clusters_by_company: dict[str, list[list[ListingObservation]]] = {}
-    clusters_by_url: dict[str, list[ListingObservation]] = {}
-    normalized: dict[str, tuple[str, str]] = {}
+    by_posting: dict[tuple[str, str, str, str], list[ListingObservation]] = {}
     for observation in valid:
         assert observation.job is not None
         identity_key = counterparty_key(observation.job)
         title = _norm(observation.job.title)
         location = _norm(observation.job.location)
-        normalized[observation.observation_id] = (title, location)
-        exact_url = public_url(observation.normalized_url).rstrip("/")
-        if not CONFIG.v55.enabled:
-            exact_url = exact_url.casefold()
-        if exact_url and exact_url in clusters_by_url and (
-            not CONFIG.v55.enabled or (
-                title == normalized[clusters_by_url[exact_url][0].observation_id][0]
-                and location == normalized[clusters_by_url[exact_url][0].observation_id][1]
-            )
-        ):
-            clusters_by_url[exact_url].append(observation)
+        exact_url = public_url(observation.normalized_url or observation.job.url).rstrip("/")
+        # An unusable URL supplies no posting identity. Only identical captured
+        # content may collapse in that case; different unresolved records must
+        # not share a canonical ID or overwrite one another in the sidecar.
+        posting_key = exact_url or "unresolved:" + _observation_content_key(observation)
+        key = (identity_key, title, location, posting_key)
+        if key in by_posting:
+            by_posting[key].append(observation)
             continue
+        cluster = [observation]
+        by_posting[key] = cluster
+        clusters.append(cluster)
 
-        bucket_key = identity_key
-        company_clusters = clusters_by_company.setdefault(bucket_key, [])
-        for cluster in company_clusters:
-            kept = cluster[0]
-            assert kept.job is not None
-            kept_title, kept_location = normalized[kept.observation_id]
-            same_title = fuzz.token_sort_ratio(title, kept_title) >= 90
-            compatible_location = (
-                not location
-                or not kept_location
-                or location == kept_location
-                or observation.job.is_remote and kept.job.is_remote
-            )
-            if CONFIG.v55.enabled:
-                same_title = title == kept_title
-                compatible_location = location == kept_location
-                kept_url = public_url(kept.normalized_url).rstrip('/')
-                # Identical employer/title/location is not a requisition key.
-                # Different public URLs need accepted original-page lineage,
-                # which is merged separately below; copies cannot guess it.
-                same_title = same_title and bool(exact_url) and exact_url == kept_url
-            if same_title and compatible_location:
-                cluster.append(observation)
-                if exact_url:
-                    clusters_by_url[exact_url] = cluster
-                break
-        else:
-            cluster = [observation]
-            company_clusters.append(cluster)
-            if exact_url:
-                clusters_by_url[exact_url] = cluster
-            clusters.append(cluster)
+    # A verified hydration child is the original behind its discovery row,
+    # not another vacancy just because the copy and ATS URLs differ. Only
+    # explicit accepted lineage can cross these strict identity boundaries.
+    owners = {o.observation_id: index for index, cluster in enumerate(clusters) for o in cluster}
+    roots = list(range(len(clusters)))
 
-    if CONFIG.v55.enabled:
-        # A verified hydration child is the original behind its discovery row,
-        # not another vacancy just because the copy and ATS URLs differ. Only
-        # explicit accepted lineage can cross these strict identity boundaries.
-        owners = {o.observation_id: index for index, cluster in enumerate(clusters) for o in cluster}
-        roots = list(range(len(clusters)))
+    def root(index: int) -> int:
+        while roots[index] != index:
+            roots[index] = roots[roots[index]]
+            index = roots[index]
+        return index
 
-        def root(index: int) -> int:
-            while roots[index] != index:
-                roots[index] = roots[roots[index]]
-                index = roots[index]
-            return index
-
-        for observation in valid:
-            if (observation.origin != 'hydration'
-                    or observation.identity_state not in {'exact', 'corroborated'}
-                    or observation.source_kind == SourceKind.CONTENT_FARM):
-                continue
-            for parent_id in observation.parent_observation_ids:
-                if parent_id in owners:
-                    left, right = root(owners[observation.observation_id]), root(owners[parent_id])
-                    roots[max(left, right)] = min(left, right)
-        merged: dict[int, list[ListingObservation]] = {}
-        for index, cluster in enumerate(clusters):
-            merged.setdefault(root(index), []).extend(cluster)
-        clusters = list(merged.values())
+    for observation in valid:
+        if (observation.origin != 'hydration'
+                or observation.identity_state not in {'exact', 'corroborated'}
+                or observation.source_kind == SourceKind.CONTENT_FARM):
+            continue
+        for parent_id in observation.parent_observation_ids:
+            if parent_id in owners:
+                left, right = root(owners[observation.observation_id]), root(owners[parent_id])
+                roots[max(left, right)] = min(left, right)
+    merged: dict[int, list[ListingObservation]] = {}
+    for index, cluster in enumerate(clusters):
+        merged.setdefault(root(index), []).extend(cluster)
+    clusters = list(merged.values())
 
     canonical: list[CanonicalJob] = []
     for cluster in clusters:
@@ -545,21 +557,20 @@ def canonicalize_observations(
             field_sources["pay_raw"] = pay_source.observation_id
 
         job.seen_on = sorted({observation.source for observation in cluster})
-        job.url = selected.normalized_url
+        job.url = public_url(selected.normalized_url or selected.job.url)
         job.source = selected.job.source
         identity_key = counterparty_key(job)
-        canonical_id = _canonical_id(job, identity_key)
-        legacy_canonical_id = canonical_id
-        if CONFIG.v55.enabled:
-            # Preserve separate requisitions/contract variants even when their
-            # title, company and city are identical. Expose the legacy key for
-            # evidence-reviewed migration; never silently reset notifications.
-            identity = canonical_id + '|' + public_url(job.url).rstrip('/')
-            canonical_id = hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]
+        legacy_canonical_id = _legacy_canonical_id(job)
+        # Keep the established V5.5 formula and use it in V4.2 as well. IDs must
+        # distinguish independent requisitions even when observed in separate
+        # runs: adding a suffix only after a batch collision would be unstable.
+        posting_key = public_url(job.url).rstrip('/') or 'unresolved:' + _observation_content_key(selected)
+        identity = _canonical_id(job, identity_key) + '|' + posting_key
+        canonical_id = hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]
         job.id = canonical_id
         canonical.append(CanonicalJob(
             canonical_id=canonical_id,
-            legacy_canonical_id=legacy_canonical_id if CONFIG.v55.enabled else None,
+            legacy_canonical_id=legacy_canonical_id,
             counterparty_key=identity_key,
             job=job,
             observations=ordered,
@@ -574,4 +585,4 @@ def canonicalize_observations(
                 f"{selected.observation_id}; {len(ordered)} observation(s)"
             ),
         ))
-    return canonical
+    return sorted(canonical, key=lambda item: item.canonical_id)
