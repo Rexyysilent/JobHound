@@ -104,12 +104,6 @@
   {
     "path": "tests/test_v41.py",
     "kind": "credential_query",
-    "sha256": "45300191c9891ba95ce8848558155a3951e6613bf8e9eb7bbcee2cfa383d0e04",
-    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
-  },
-  {
-    "path": "tests/test_v41.py",
-    "kind": "credential_query",
     "sha256": "e0fc50aab86ed3682082b993506bd0eadfd2a455f28e57c0175311a295c9ab26",
     "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
   },
@@ -232,5 +226,47 @@
     "kind": "credential_query",
     "sha256": "6638ba1b795adae61e9aa322f52f67c17b049f53eae6404a3994bab368bc4b34",
     "reason": "Literal token=synthetic tests quarantine of an authenticated work route."
+  },
+  {
+    "path": "tests/test_ats.py",
+    "kind": "credential_query",
+    "sha256": "685e77268bb229990a80cc74f966e510a0de6a9380934b60c220109f4e2eff8f",
+    "reason": "Reviewed literal campaign metadata in a synthetic posting-identity regression; not a credential."
+  },
+  {
+    "path": "tests/test_opportunity_canonicalization.py",
+    "kind": "credential_query",
+    "sha256": "b15f94f26b75d5976d4b7085788dafa33fe15cca36766e96d973b8e71126550f",
+    "reason": "Reviewed literal campaign metadata in a synthetic posting-identity regression; not a credential."
+  },
+  {
+    "path": "tests/test_opportunity_canonicalization.py",
+    "kind": "credential_query",
+    "sha256": "44c1f01857e39d7d849328de3d5332170275c7b672cb0952da479aaea7ed44ed",
+    "reason": "Reviewed literal campaign metadata in a synthetic posting-identity regression; not a credential."
+  },
+  {
+    "path": "tests/test_opportunity_receipt_compatibility.py",
+    "kind": "credential_query",
+    "sha256": "cc4775d02f5bdef37e35faa818b04b3845cadf7944df8736c1dd43f4ad5250e0",
+    "reason": "Reviewed literal campaign metadata in a synthetic posting-identity regression; not a credential."
+  },
+  {
+    "path": "tests/test_opportunity_receipt_compatibility.py",
+    "kind": "credential_query",
+    "sha256": "4f36213b1bf5b0c5800ce471be717b784fe652555b9c0a8ae527c70415f9aaed",
+    "reason": "Reviewed literal campaign metadata in a synthetic posting-identity regression; not a credential."
+  },
+  {
+    "path": "tests/test_opportunity_retention.py",
+    "kind": "credential_query",
+    "sha256": "e8dce769ca4e2a76dcc472a8405c4cae6aec29bea0b99d747ca289d39ee7b09b",
+    "reason": "Reviewed literal campaign metadata in a synthetic posting-identity regression; not a credential."
+  },
+  {
+    "path": "tests/test_v41.py",
+    "kind": "credential_query",
+    "sha256": "5d0319594511554a4acb57551c9f8d120edfeddf77044724558f6cb0396cc1dc",
+    "reason": "Reviewed literal campaign metadata in a synthetic posting-identity regression; not a credential."
   }
 ]

@@ -25,6 +25,13 @@ BODY = 'I need a developer to repair a WhatsApp and Google Sheets workflow. Requ
 def policy(monkeypatch):
     monkeypatch.setattr(CONFIG.v55, 'enabled', True)
     monkeypatch.setattr(CONFIG.v55, 'account_states', [])
+    class FixtureClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW.astimezone(tz) if tz is not None else NOW.replace(tzinfo=None)
+    # Retrieval and assessment share the fixture clock; buyer posts must not
+    # age into watch-only leads merely because the suite runs on a later date.
+    monkeypatch.setattr('jobhound.v41.community.datetime', FixtureClock)
 
 
 def post(key=1, uid=10, text=BODY, **updates):

@@ -134,7 +134,7 @@ def test_farm_only_is_source_quality_reject():
     assert item.assessment.source_actionability == SourceKind.CONTENT_FARM
 
 
-def test_canonical_original_beats_farm_copy_without_taint():
+def test_independent_farm_url_does_not_taint_or_merge_with_original():
     title = "Bengali AI Data Evaluator"
     farm = _jsearch(
         title,
@@ -148,13 +148,15 @@ def test_canonical_original_beats_farm_copy_without_taint():
         _requirements("Bengali annotation and model evaluation."),
     )
     result = evaluate_raw([farm, ats])
-    assert result.counts["canonical_jobs"] == 1
-    assert result.counts["duplicate_observations_collapsed"] == 1
-    item = result.evaluated[0]
-    assert len(item.canonical.observations) == 2
+    assert result.counts["canonical_jobs"] == 2
+    assert result.counts["duplicate_observations_collapsed"] == 0
+    item = next(row for row in result.evaluated if "greenhouse.io" in row.job.url)
+    rejected = next(row for row in result.evaluated if "bebee.com" in row.job.url)
+    assert len(item.canonical.observations) == 1
     assert item.assessment.source_actionability == SourceKind.ORIGINAL_ATS
     assert item.decision.action_band == ActionBand.PRIMARY
-    assert "greenhouse.io" in item.job.url
+    assert rejected.decision.action_band == ActionBand.REJECT
+    assert rejected.decision.terminal_reason == "reject_source_quality"
 
 
 def test_project_chiron_is_strong_verify_not_lost():
@@ -368,6 +370,7 @@ def test_description_pay_candidate_and_conflict_route_to_verify():
         title,
         "Conflict Labs",
         _requirements("Compensation: $30 per hour. Bengali annotation."),
+        location="India",
     )
     board = _jsearch(
         title,
@@ -438,23 +441,24 @@ def test_notification_transition_new_then_promoted_once(tmp_path):
     path = tmp_path / "v41.db"
     store = V41Store(path)
     first = evaluate_raw(
-        [_adzuna(
-            "Bengali AI Evaluator",
+        [_greenhouse(
+            "Bengali AI Evaluator | $30/hr",
             "Transition Labs",
-            _requirements("Bengali annotation."),
+            _requirements("Bengali annotation. Compensation: $10 per hour."),
         )],
         as_of=datetime(2026, 7, 30, 9, 0, tzinfo=timezone.utc),
     )
     first_items = store.annotate_transitions(first)
     assert first_items[0].decision.notification_transition == "new"
+    assert first_items[0].decision.action_band == ActionBand.VERIFY
     store.record_run(first)
     store.mark_notified(first.metadata.run_id, first_items, "email", True)
 
     second = evaluate_raw(
         [_greenhouse(
-            "Bengali AI Evaluator",
+            "Bengali AI Evaluator | $30/hr",
             "Transition Labs",
-            _requirements("Bengali annotation."),
+            _requirements("Bengali annotation. Compensation: $30 per hour."),
         )],
         as_of=datetime(2026, 7, 30, 10, 0, tzinfo=timezone.utc),
     )
@@ -465,9 +469,9 @@ def test_notification_transition_new_then_promoted_once(tmp_path):
 
     third = evaluate_raw(
         [_greenhouse(
-            "Bengali AI Evaluator",
+            "Bengali AI Evaluator | $30/hr",
             "Transition Labs",
-            _requirements("Bengali annotation."),
+            _requirements("Bengali annotation. Compensation: $30 per hour."),
         )],
         as_of=datetime(2026, 7, 30, 11, 0, tzinfo=timezone.utc),
     )
@@ -1018,7 +1022,7 @@ def test_rws_registry_identity_drives_clustering_and_company_cap():
         _requirements("Hindi language evaluation."),
     )
     duplicate_b["raw"]["redirect_url"] = (
-        "https://www.adzuna.in/details/2?utm_source=fake"
+        "https://www.adzuna.in/details/5809895702?utm_source=mirror"
     )
     clustered = evaluate_raw([duplicate_a, duplicate_b])
     assert clustered.counts["canonical_jobs"] == 1
@@ -1026,6 +1030,9 @@ def test_rws_registry_identity_drives_clustering_and_company_cap():
         "registry:rws_trainai"
     )
     assert len(clustered.evaluated[0].canonical.observations) == 2
+
+    duplicate_b["raw"]["redirect_url"] = "https://www.adzuna.in/details/2"
+    assert evaluate_raw([duplicate_a, duplicate_b]).counts["canonical_jobs"] == 2
 
     three_roles = [
         _adzuna(

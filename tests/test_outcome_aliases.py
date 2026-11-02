@@ -51,10 +51,12 @@ def test_host_case_and_tracking_do_not_create_distinct_requisitions():
     assert len(result.evaluated[0].canonical.observations)==2
 
 
-def test_legacy_policy_keeps_historical_case_folding(monkeypatch):
+def test_default_policy_preserves_case_sensitive_posting_paths(monkeypatch):
     monkeypatch.setattr(CONFIG.v55,'enabled',False)
     rows=[scoped_observation('one','https://jobs.example.org/Role'),scoped_observation('two','https://jobs.example.org/role')]
-    assert len(canonicalize_observations(rows))==1
+    canonical=canonicalize_observations(rows)
+    assert len(canonical)==2
+    assert len({item.canonical_id for item in canonical})==2
 
 
 def migration():

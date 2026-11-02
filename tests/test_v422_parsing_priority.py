@@ -16,7 +16,8 @@ from jobhound.normalize import normalize
 from jobhound.sources.adzuna import AdzunaSource, _fallback_identity
 from jobhound.text import html_to_text
 from jobhound.v41.digest import build_digest
-from jobhound.v41.engine import _decision, evaluate_raw
+from jobhound.v41.engine import _decision, evaluate_observations, evaluate_raw
+from jobhound.v41.provenance import build_observations
 from jobhound.v41.roles import assess_role
 from jobhound.v41.resolve import _is_ats_host
 from jobhound.v41.store import V41Store
@@ -32,6 +33,20 @@ from jobhound.v41.models import (
     PayState,
     SourceKind,
 )
+
+
+def _verified_original_and_copy(original, copy):
+    """An explicit accepted link, independent of source-specific claim quality."""
+    observations, failures = build_observations([original, copy])
+    assert not failures
+    child, parent = observations
+    child.origin = "hydration"
+    child.identity_state = "exact"
+    child.parent_observation_ids = [parent.observation_id]
+    result = evaluate_observations(observations)
+    assert result.accounting_ok
+    assert len(result.evaluated) == 1
+    return result.evaluated[0]
 
 
 def test_html_normalization_preserves_heading_and_list_structure():
@@ -305,7 +320,7 @@ def test_pay_credibility_uses_the_pay_observation_not_canonical_url_source():
     aggregator["raw"]["salary_min"] = 104000
     aggregator["raw"]["salary_max"] = 130000
 
-    item = evaluate_raw([ats, aggregator]).evaluated[0]
+    item = _verified_original_and_copy(ats, aggregator)
 
     assert item.canonical.best_observation.source_kind.value == "original_ats"
     assert item.assessment.selected_pay is not None
@@ -331,7 +346,7 @@ def test_source_first_description_keeps_lower_tier_evidence_independent():
         board_description,
     )
 
-    item = evaluate_raw([ats, board]).evaluated[0]
+    item = _verified_original_and_copy(ats, board)
 
     assert "Native German required" not in item.canonical.job.description
     assert item.canonical.field_sources["description"] == item.canonical.best_observation.observation_id
@@ -646,7 +661,7 @@ def test_fixed_and_hourly_claims_create_a_basis_conflict():
         "Basis Conflict Labs",
         _requirements(" Project budget: $500."),
     )
-    item = evaluate_raw([hourly, fixed]).evaluated[0]
+    item = _verified_original_and_copy(hourly, fixed)
 
     assert item.assessment.pay_conflict
     assert {candidate.basis for candidate in item.assessment.pay_candidates} >= {
