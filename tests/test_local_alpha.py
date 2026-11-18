@@ -1,7 +1,9 @@
 """Actual local workflow isolation and recovery; no provider or production state."""
 import json
+import os
 from pathlib import Path
 import sqlite3
+import stat
 import subprocess
 import sys
 from datetime import datetime
@@ -229,3 +231,66 @@ def test_actual_local_reviewed_files_use_selected_profile_and_reject_foreign_del
     assert not (root/'profiles/second/reviews/foreign').exists()
     assert main(['review','replay',str(snapshot),'--data-dir',str(root),'--name','replayed'])==0
     assert json.loads((root/'profiles/english/reviews/replayed/audit.json').read_text())['accounting_ok']
+
+
+def _tree(root):
+    return [root,*sorted(root.rglob('*'))]
+
+
+def test_backup_and_restore_publish_owner_only_directories_and_files(tmp_path,monkeypatch):
+    # Portable half: on Windows chmod only toggles read-only, so record the modes requested.
+    # Contents are restricted in the private stage before the rename, so key by relative path.
+    root=initialize(tmp_path);requested={};chmod=state.os.chmod
+    def record(path,mode,*args,**kwargs):
+        path=Path(path).resolve()
+        for top in (path,*path.parents):
+            if top.name.startswith('.jobhound-local-') or top.name in ('backup','restored'):
+                requested[path.relative_to(top).as_posix()]=mode;break
+        return chmod(path,mode,*args,**kwargs)
+    monkeypatch.setattr(state.os,'chmod',record)
+    for published,run in ((tmp_path/'backup',lambda target:state.backup(root,target)),
+                          (tmp_path/'restored',lambda target:state.restore(tmp_path/'backup',target))):
+        requested.clear();run(published)
+        for path in _tree(published):
+            assert requested.get(path.relative_to(published).as_posix())==(0o700 if path.is_dir() else 0o600),path
+
+
+@pytest.mark.skipif(os.name=='nt',reason='POSIX permission bits')
+def test_owner_only_files_stay_owner_only_through_backup_and_restore_under_a_permissive_umask(tmp_path):
+    root=initialize(tmp_path);secret=root/'profiles/english/state/private.sqlite'
+    db=sqlite3.connect(secret);db.execute('CREATE TABLE t(x)');db.commit();db.close();os.chmod(secret,0o600)
+    tmp_path.chmod(0o755)
+    previous=os.umask(0o022)
+    try:
+        backup=tmp_path/'backup';state.backup(root,backup)
+        restored=tmp_path/'restored';state.restore(backup,restored)
+    finally:os.umask(previous)
+    for published in (backup,restored):
+        for path in _tree(published):
+            assert stat.S_IMODE(path.stat().st_mode)==(0o700 if path.is_dir() else 0o600),path
+
+
+def test_copied_files_are_created_owner_only_before_any_bytes_arrive(tmp_path,monkeypatch):
+    # _restrict re-chmods later; this pins the copy step itself (review 2026-11-18).
+    root=initialize(tmp_path);created={};opened=state.os.open;copy=state.shutil.copyfile
+    def record_open(path,flags,mode=0o777,*args,**kwargs):
+        created[Path(path).resolve()]=(flags&os.O_EXCL,mode);return opened(path,flags,mode,*args,**kwargs)
+    def checked_copy(source,destination):
+        assert created.get(Path(destination).resolve())==(os.O_EXCL,0o600),destination
+        if os.name!='nt':assert stat.S_IMODE(os.stat(destination).st_mode)==0o600
+        return copy(source,destination)
+    monkeypatch.setattr(state.os,'open',record_open);monkeypatch.setattr(state.shutil,'copyfile',checked_copy)
+    state.backup(root,tmp_path/'backup');state.restore(tmp_path/'backup',tmp_path/'restored')
+    assert created
+
+
+@pytest.mark.skipif(os.name=='nt',reason='POSIX permission bits')
+def test_add_profile_keeps_the_workspace_marker_owner_only_under_a_permissive_umask(tmp_path):
+    root=initialize(tmp_path)
+    previous=os.umask(0o022)
+    try:state.add_profile(root,'french')
+    finally:os.umask(previous)
+    assert stat.S_IMODE((root/state.MARKER).stat().st_mode)==0o600
+    assert json.loads((root/state.MARKER).read_text(encoding='utf-8'))['profiles']==['english','french']
+    for path in _tree(root/'profiles/french'):
+        assert stat.S_IMODE(path.stat().st_mode)==(0o700 if path.is_dir() else 0o600),path

@@ -29,6 +29,7 @@ import logging
 import re
 import ssl
 from html import unescape
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -72,6 +73,7 @@ _PROJECT_RE = re.compile(
     r"([A-Z][\w' -]{2,40})")
 
 _LINK_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
+_PLAIN_HOST_RE = re.compile(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.?")
 
 
 def _pick_rate(text: str) -> tuple[re.Match, float, str, str] | None:
@@ -196,14 +198,30 @@ def _platform_link(body: str, platform_domain: str) -> str:
     """First link on the configured platform domain (or a subdomain); else its
     homepage. (HANDOFF §10: we link to originals — never to anything else in
     the mail.) The configured domain is used as-is: taking the sender's last
-    two labels turned alerts.example.co.uk into "co.uk"."""
+    two labels turned alerts.example.co.uk into "co.uk".
+
+    The host comes from a URL parser, never from splitting the string:
+    "https://jobs.example.com:x@example.net/" has userinfo
+    "jobs.example.com:x" and host example.net. Links are skipped
+    unless they are HTTPS, carry no credentials, have a valid port, contain
+    no backslash (browsers read "\\" as "/") and have a plain ASCII
+    letters/digits/dots/hyphens host (a browser decodes "evil.net%2F.example.com"
+    differently from the parser) — anything where the parser and the browser
+    could disagree about the host is skipped."""
     for m in _LINK_RE.finditer(body):
-        try:
-            host = m.group(0).split("/")[2].lower().split(":")[0]
-        except IndexError:
+        link = m.group(0).rstrip(".,;:!?")  # sentence punctuation, not URL
+        if "\\" in link:
             continue
-        if _within(host, platform_domain):
-            return m.group(0)
+        try:
+            parts = urlsplit(link)
+            parts.port  # raises ValueError on a malformed port
+        except ValueError:
+            continue
+        if (parts.scheme.lower() != "https" or "@" in parts.netloc
+                or not _PLAIN_HOST_RE.fullmatch(parts.hostname or "")):
+            continue
+        if parts.hostname and _within(parts.hostname, platform_domain):
+            return link
     return f"https://{platform_domain}"
 
 

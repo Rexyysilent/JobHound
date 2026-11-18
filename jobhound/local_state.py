@@ -84,15 +84,37 @@ def _discard_owned_stage(stage,parent):
     shutil.rmtree(resolved)
 
 
+PRIVATE_DIR=0o700
+PRIVATE_FILE=0o600
+
+
+def _copy_private(source,destination):
+    # copyfile keeps the destination's mode, so create it owner-only first (never
+    # inheriting the source's or the umask's looser bits), then copy the bytes in.
+    os.close(os.open(destination,os.O_WRONLY|os.O_CREAT|os.O_EXCL,PRIVATE_FILE))
+    os.chmod(destination,PRIVATE_FILE)
+    shutil.copyfile(source,destination)
+
+
+def _restrict(stage):
+    # Workspaces, backups and restores hold private state: owner-only throughout,
+    # applied while still inside the mkdtemp (0700) stage, before anything is discoverable.
+    for path in sorted(stage.rglob('*')):
+        no_link(path)
+        os.chmod(path,PRIVATE_DIR if path.is_dir() else PRIVATE_FILE)
+
+
 def _publish(target,writer):
     target.parent.mkdir(parents=True,exist_ok=True)
     stage=Path(tempfile.mkdtemp(prefix='.jobhound-local-',dir=target.parent))
     try:
         writer(stage)
+        _restrict(stage)
         # rename never replaces an existing nonempty workspace; check even empty roots.
         if target.exists():raise ValueError('local_destination_must_be_new')
         # Atomic reservation also refuses an empty directory created concurrently.
-        target.mkdir(exist_ok=False)
+        # mode is masked by the umask, so set it explicitly as well.
+        target.mkdir(mode=PRIVATE_DIR,exist_ok=False);os.chmod(target,PRIVATE_DIR)
         for child in sorted(stage.iterdir(),key=lambda path:path.name in {MARKER,'manifest.json'}):
             child.rename(target/child.name)
     finally:
@@ -127,7 +149,7 @@ def add_profile(data_dir,name):
     stage=Path(tempfile.mkdtemp(prefix='.jobhound-local-',dir=current.root/'profiles'))
     try:
         for source,destination in zip(EXAMPLES,POLICIES):shutil.copyfile(ROOT/source,stage/destination)
-        (stage/'state').mkdir();(stage/'reviews').mkdir()
+        (stage/'state').mkdir();(stage/'reviews').mkdir();_restrict(stage)
         stage.rename(target)
         try:load_policies(LocalPaths(current.root,name))
         except Exception:
@@ -135,7 +157,10 @@ def add_profile(data_dir,name):
             target.rename(stage);raise
         marker['profiles'].append(name)
         temporary=current.root/(MARKER+'.new')
-        with temporary.open('x',encoding='utf-8') as handle:json.dump(marker,handle,indent=2)
+        # Same owner-only mode the published marker has; a plain open('x') would get the umask default.
+        fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0),PRIVATE_FILE)
+        os.chmod(temporary,PRIVATE_FILE)
+        with os.fdopen(fd,'w',encoding='utf-8') as handle:json.dump(marker,handle,indent=2)
         os.replace(temporary,current.root/MARKER)
     finally:
         if stage.exists():_discard_owned_stage(stage,current.root/'profiles')
@@ -256,7 +281,7 @@ def backup(data_dir,output):
         for directory in directories:(stage/'files'/directory).mkdir(parents=True,exist_ok=True)
         for row in rows:
             source=local.root/row['path'];destination=stage/'files'/row['path']
-            destination.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,destination)
+            destination.parent.mkdir(parents=True,exist_ok=True);_copy_private(source,destination)
             if sha(source)!=row['sha256'] or sha(destination)!=row['sha256']:raise ValueError('local_backup_source_changed')
         if _files(local.root)!=rows or _directories(local.root)!=directories:raise ValueError('local_backup_source_changed')
         _write_json(stage/'manifest.json',dict(schema='jobhound-local-backup/v1',files=rows,databases=databases,
@@ -305,7 +330,7 @@ def restore(backup_dir,data_dir):
         for directory in manifest['directories']:(stage/directory).mkdir(parents=True,exist_ok=True)
         for row in rows:
             destination=stage/row['path'];destination.parent.mkdir(parents=True,exist_ok=True)
-            shutil.copyfile(source/'files'/row['path'],destination)
+            _copy_private(source/'files'/row['path'],destination)
             if sha(destination)!=row['sha256']:raise ValueError('local_backup_source_changed')
         marker=_marker(stage)
         for name in marker['profiles']:
