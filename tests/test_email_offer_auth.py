@@ -8,6 +8,8 @@ example.co.uk any link on attacker.co.uk counted as the platform's.
 import email
 import email.policy
 
+import pytest
+
 from jobhound.sources.email_offers import _platform_link, _sender_authenticated, offer_from_message
 
 MAPPING = {'example.com': 'platform_a', 'example.co.uk': 'example_uk'}
@@ -46,7 +48,7 @@ def test_only_the_topmost_result_from_a_trusted_receiver_counts():
 def test_aligned_dkim_pass_authenticates_but_unaligned_does_not():
     aligned = 'mx.google.com;\n dkim=pass header.i=@mail.example.com header.s=s1;\n dmarc=none header.from=example.com'
     assert _sender_authenticated(message(results=(aligned,)), 'example.com', TRUSTED)
-    unaligned = 'mx.google.com;\n dkim=pass header.d=attacker.example.net;\n dmarc=none header.from=example.com'
+    unaligned = 'mx.google.com;\n dkim=pass header.d=example.net;\n dmarc=none header.from=example.com'
     assert not _sender_authenticated(message(results=(unaligned,)), 'example.com', TRUSTED)
 
 
@@ -73,3 +75,34 @@ def test_platform_link_uses_the_configured_domain_not_the_last_two_labels():
     body = 'See https://attacker.co.uk/steal and https://jobs.example.co.uk/role/7'
     assert _platform_link(body, 'example.co.uk') == 'https://jobs.example.co.uk/role/7'
     assert _platform_link('Only https://attacker.co.uk/steal', 'example.co.uk') == 'https://example.co.uk'
+
+
+@pytest.mark.parametrize('link', [
+    'https://jobs.example.com:pass@example.net/p/1',   # credentials field read as the host
+    'https://jobs.example.com@example.net/p/1',        # bare userinfo
+    r'https://example.net\@jobs.example.com/p/1',     # browsers treat \ as /
+    'https://user:pw@example.com/p/1',                          # embedded credentials on the real host
+    'http://jobs.example.com/p/1',                              # not HTTPS
+    'https://jobs.example.com:notaport/p/1',                    # unparseable port
+    'https://example.net%2F.example.com/p/1',                   # browser decodes the host differently
+    'https://jöbs.example.com/p/1',                             # non-ASCII host
+])
+def test_platform_link_rejects_links_whose_parsed_host_or_scheme_is_not_trusted(link):
+    assert _platform_link(f'Apply: {link}', 'example.com') == 'https://example.com'
+
+
+def test_platform_link_skips_an_untrusted_link_and_keeps_a_later_genuine_one():
+    body = ('Apply: https://jobs.example.com:x@example.net/p/1 '
+            'or https://jobs.example.com:443/p/2')
+    assert _platform_link(body, 'example.com') == 'https://jobs.example.com:443/p/2'
+
+
+def test_platform_link_ignores_trailing_sentence_punctuation():
+    assert _platform_link('Apply at https://jobs.example.com:443.', 'example.com') == 'https://jobs.example.com:443'
+    assert _platform_link('See https://jobs.example.com/p/9, today', 'example.com') == 'https://jobs.example.com/p/9'
+
+
+def test_authenticated_email_with_a_credentials_trick_link_stores_only_the_homepage():
+    body = 'Bengali project at USD 12 per hour. Apply: https://jobs.example.com:pw@example.net/p/1'
+    offer, reason = offer_from_message(message(body=body), MAPPING, require_auth=True, trusted=TRUSTED)
+    assert reason == 'accepted' and offer['url'] == 'https://example.com'

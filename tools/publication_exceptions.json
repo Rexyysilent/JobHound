@@ -268,5 +268,35 @@
     "kind": "credential_query",
     "sha256": "5d0319594511554a4acb57551c9f8d120edfeddf77044724558f6cb0396cc1dc",
     "reason": "Reviewed literal campaign metadata in a synthetic posting-identity regression; not a credential."
+  },
+  {
+    "path": "jobhound/sources/email_offers.py",
+    "kind": "url_userinfo",
+    "sha256": "45e740c04204888601f07fc049f1122a7e8d4e301401886a136605aa18827efe",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_email_offer_auth.py",
+    "kind": "url_userinfo",
+    "sha256": "72b361c08e4614e3277ec9299272b45eb617bf306f5bf10914168bf472b6811e",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_email_offer_auth.py",
+    "kind": "url_userinfo",
+    "sha256": "1b0fa5d1b6d405a284ab33f3be840ea69192fce70155c7ccfe846c18770bdfe0",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_email_offer_auth.py",
+    "kind": "url_userinfo",
+    "sha256": "936f1cd7b6c1d8b91c59fb8f4537a571c92a73235b3618aa52dce0b55385e3fb",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
+  },
+  {
+    "path": "tests/test_email_offer_auth.py",
+    "kind": "url_userinfo",
+    "sha256": "c70b55be17dd9726dc770bc79cb427dde5db969399f4bde76eb94e6445091e7d",
+    "reason": "Reviewed synthetic security regression input or literal API documentation placeholder; not a credential."
   }
 ]
