@@ -12,9 +12,11 @@ jobs, connect accounts, run collectors, send notifications or submit
 applications. Untrusted text is escaped and non-HTTP(S) links are not clickable.
 
 It accepts files up to 32 MiB and pages through large cohorts 200 cards at a
-time. A full `audit.json` from a real run can be over 100 MB, so load a compact
-audit (`jobhound.compact_audit.write_compact_audit`) rather than the full one. A
-CLI flag for compact export is on the roadmap.
+time. A full `audit.json` from a real run can be over 100 MB. Review capture and
+replay now also write `audit.compact.json`, which retains every decision and
+links to its exact source snapshot. Load that file into the workbench. If even
+the compact export exceeds 32 MiB, the run reports that explicitly and retains
+the full audit plus the small quality report.
 
 ## 2. Install and run the tests
 
@@ -62,8 +64,24 @@ production databases or send anything.
 .venv\Scripts\python.exe run.py review replay review\first-look\<snapshot>.jsonl --output-dir review\replay-1
 ```
 
-Each run writes a digest, a full audit and a snapshot. A replay of the same
-snapshot is deterministic: the printed decision fingerprint should not change.
+Capture and replay write a digest, the existing full `audit.json`, a bounded
+`audit.compact.json`, and a `quality.json` report. Capture saves the source
+snapshot; replay refers to the snapshot it consumed. Both manifests include
+the snapshot's exact SHA-256 and the new export paths/hashes. A replay of the
+same snapshot is deterministic: the printed decision fingerprint should not
+change when the code and effective profile/policy are unchanged.
+
+Inspect the full cohort's evidence gaps without collecting or sending anything:
+
+```powershell
+.venv\Scripts\python.exe -m jobhound.review_audit quality review\first-look\audit.compact.json
+```
+
+The report counts application-ready, verification, status and rejected
+candidates, shows missing facts and yield by retained source, and flags missing
+or degraded collection evidence. It measures saved decisions, not externally
+verified job accuracy. See [run-quality diagnostics](run_quality.md) for the
+counting rules and limitations.
 
 `review outcomes` previews reviewed application/buyer events against a snapshot
 (offline; it never imports into a production store). Run it with `--help` for

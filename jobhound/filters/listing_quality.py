@@ -8,6 +8,14 @@ from ..config import CONFIG, ListingQualityCfg
 
 
 _COUNT_TITLE = re.compile(r"^\s*\d[\d,.]*\s+.{0,80}\b(?:jobs?|vacancies)\b", re.IGNORECASE)
+# A category can put its result count after the subject instead of first:
+# "Bengali AI Training Jobs: 28 Open Roles". A count of openings on one
+# named role ("Bengali Evaluator — 3 openings") is not this signal.
+_COUNTED_JOB_INDEX = re.compile(
+    r"\b(?:jobs|vacancies)\s*[:|–—-]\s*\d[\d,.]*\+?\s+"
+    r"(?:(?:open|available|current)\s+)?(?:roles|positions|openings|jobs)\b",
+    re.IGNORECASE,
+)
 _SEARCH_URL = re.compile(
     r"(SRCH_|/jobs\?|[?&](?:q|query|search|keywords?)=|/search[/?]|-jobs-SRCH|"
     r"indeed\.[^/]+/q-[^?#]+-jobs(?:\.html)?(?:[?#]|$))",
@@ -121,7 +129,7 @@ _FOREIGN_PLACES = (
     "cabo verde", "cape verde", "cambodia", "cameroon", "canada", "central african republic",
     "chile", "china", "colombia", "comoros", "congo", "costa rica", "cote d'ivoire",
     "ivory coast", "croatia", "cuba", "cyprus", "czech republic", "czechia", "denmark",
-    "djibouti", "dominica", "dominican republic", "ecuador", "egypt", "el salvador",
+    "deutschland", "djibouti", "dominica", "dominican republic", "ecuador", "egypt", "el salvador",
     "equatorial guinea", "eritrea", "estonia", "eswatini", "swaziland", "ethiopia", "fiji",
     "finland", "france", "gabon", "gambia", "georgia", "germany", "ghana", "greece",
     "grenada", "guatemala", "guinea", "guinea-bissau", "guyana", "haiti", "honduras",
@@ -167,6 +175,15 @@ _EXPLICIT_ONSITE = re.compile(
     r"\b(?:on[ -]?site|in[ -]?office|office[ -]?based|work\s+from\s+office|wfo|hybrid)\b",
     re.IGNORECASE,
 )
+_GERMAN_ONSITE = re.compile(r"\bvor\s+ort\b", re.IGNORECASE)
+_GERMAN_OPTIONAL_ONSITE = re.compile(
+    r"\b(?:nicht|ohne)\s+vor\s+ort\b|"
+    r"\b(?:keine?|ohne)\s+(?:arbeit|tätigkeit|anwesenheit|präsenz)\s+vor\s+ort\b|"
+    r"\bvor\s+ort\s+(?:optional|auf\s+wunsch|(?:ist\s+)?nicht\s+(?:erforderlich|notwendig|verpflichtend))\b|"
+    r"\bvor\s+ort(?:\s+in\s+[^,;.!?\n]{1,40})?\s+oder\s+(?:fully\s+)?remote\b|"
+    r"\bremote\s+oder\s+vor\s+ort\b",
+    re.IGNORECASE,
+)
 _GENERIC_REMOTE_LOCATION = re.compile(
     r"^\s*(?:remote|anywhere|worldwide|global|work\s+from\s+home)\s*$",
     re.IGNORECASE,
@@ -180,6 +197,7 @@ def junk_check(title: str, url: str, company: str | None,
     reasons: list[str] = []
     if _COUNT_TITLE.search(title):
         reasons.append("junk:count_title_search_page")
+    reasons.extend(counted_job_index_check(title))
     if _SEARCH_URL.search(url):
         reasons.append("junk:search_results_url")
     if _MARKETPLACE_INDEX_URL.search(url):
@@ -198,6 +216,13 @@ def junk_check(title: str, url: str, company: str | None,
     reasons.extend(content_page_check(title, url))
     reasons.extend(farm_source_check(url, company_domain, cfg))
     return reasons
+
+
+def counted_job_index_check(title: str) -> list[str]:
+    """A plural job-category heading with a result count is not one vacancy."""
+    if _COUNTED_JOB_INDEX.search(title):
+        return ["junk:counted_job_index"]
+    return []
 
 
 def farm_source_check(url: str, company_domain: str | None = None,
@@ -396,6 +421,8 @@ def location_gate(is_remote: bool, region_tags: list[str],
     explicit_text = _EXCLUSION_CLAUSE.sub(
         "", f"{normalized_location}\n{normalized_title}\n{location_lines}\n" + '\n'.join(role_onsite))
     if _EXPLICIT_ONSITE.search(explicit_text):
+        return ["rejected_location:onsite_or_hybrid"]
+    if _GERMAN_ONSITE.search(_GERMAN_OPTIONAL_ONSITE.sub("", explicit_text)):
         return ["rejected_location:onsite_or_hybrid"]
     if _FOREIGN_LOCATION.search(explicit_text) and not _INDIA_LOCATION.search(explicit_text):
         match = _FOREIGN_LOCATION.search(explicit_text)

@@ -98,12 +98,12 @@ def test_overflow_cards_are_listed_in_the_email_not_silently_dropped(store):
     ids = [r["id"] for r in store.delivery.inspect()]
     body = transport.inspect(transport.prepare(EMAIL, ids, now=101,
                                                summary_run_id=value.metadata.run_id))["body"]
-    assert "Also eligible (not carded)" in body
+    assert "Other matches (not full cards)" in body
     # Wording revised after review of 0836247 (card-only counts, current states).
-    assert ("Jobs this run: 12 eligible; 5 newly queued, 7 listed below, "
+    assert ("Candidates this run: 12 matched; 5 newly queued, 7 listed below, "
             "0 already queued or sent in an earlier run.") in body
     assert "This email carries 5 job cards" in body
-    section = body.split("Also eligible (not carded)", 1)[1]
+    section = body.split("Other matches (not full cards)", 1)[1]
     listed = [line for line in section.splitlines() if line.startswith("• ")]
     assert len(listed) == 5  # at most five per employer
     assert all("Lilt" in line and "https://jobs.ashbyhq.com/lilt/" in line for line in listed)
@@ -135,8 +135,8 @@ def test_older_reports_without_an_overflow_list_still_render(store):
         for key in ("overflow", "cards", "card_intent_ids"):
             destination.pop(key)
     body = _render_with_report(store, pre_0836247)
-    assert "Also eligible" not in body and "Jobs this run" not in body
-    assert "7 more eligible jobs are in the local run audit" in body
+    assert "Other matches" not in body and "Candidates this run" not in body
+    assert "7 more matched candidates are in the local run audit" in body
 
 
 def test_reports_from_0836247_keep_their_overflow_list(store):
@@ -145,5 +145,5 @@ def test_reports_from_0836247_keep_their_overflow_list(store):
         for key in ("cards", "card_intent_ids"):
             destination.pop(key)
     body = _render_with_report(store, from_0836247)
-    assert "Also eligible (not carded)" in body and "+ 2 more from Lilt" in body
-    assert "Jobs this run" not in body
+    assert "Other matches (not full cards)" in body and "+ 2 more from Lilt" in body
+    assert "Candidates this run" not in body

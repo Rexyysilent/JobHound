@@ -56,7 +56,7 @@ from .roles import assess_role, specialist_blockers
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _MANAGEMENT = re.compile(
-    r"\b(?:manager|leader|director|chief|vice\s+president|vp|"
+    r"\b(?:manager|mgr\.?|leader|director|chief|vice\s+president|vp|"
     r"delivery\s+lead|team\s+lead|program\s+manager|project\s+manager)\b|"
     r"\bhead\s+of\b|\bhead\b(?=\s*(?:$|[,\-|:;()\[\]/]))",
     re.IGNORECASE,
@@ -460,6 +460,9 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         *location_mismatches(requirements_assessment),
     ]
     if CONFIG.v55.enabled:
+        if canonical.best_observation.work_arrangement.state in {'onsite', 'hybrid'}:
+            if 'rejected_location:onsite_or_hybrid' not in location_reasons:
+                location_reasons.append('rejected_location:onsite_or_hybrid')
         if 'rejected_location:unknown' in location_reasons:
             location_reasons.remove('rejected_location:unknown')
             assessment.unresolved.append('location_scope_unknown')
@@ -470,7 +473,10 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         and job.location
         and not requirements_assessment.location_scope
         and not re.fullmatch(
-            r"\s*(?:remote|anywhere|worldwide|global|work from home)\s*",
+            # A remote modality says nothing about applicant residence. V5.5
+            # keeps that useful lead for one country-scope check.
+            (r"\s*(?:anywhere|worldwide|global)\s*" if CONFIG.v55.enabled
+             else r"\s*(?:remote|anywhere|worldwide|global|work from home)\s*"),
             job.location,
             re.IGNORECASE,
         )
@@ -741,6 +747,15 @@ def _assess(canonical: CanonicalJob, as_of: datetime) -> Assessment:
         from .action_policy import apply_action_policy
         if canonical.best_observation.work_arrangement.state == 'conflicting':
             assessment.unresolved.append('location_scope_conflict:work_arrangement')
+        arrangement = canonical.best_observation.work_arrangement
+        if arrangement.state == 'unknown' and any(
+            claim.value == 'remote_or_hybrid' for claim in arrangement.claims
+        ):
+            assessment.unresolved.append('location_scope_unknown:remote_or_hybrid')
+        if not assessment.blockers and any(
+            reason.startswith('location_scope_') for reason in assessment.unresolved
+        ):
+            assessment.eligibility = EligibilityStatus.UNKNOWN
         apply_action_policy(canonical, assessment, as_of)
         from .payout import apply_payout_constraints
         apply_payout_constraints(canonical, assessment, as_of)
@@ -1084,11 +1099,15 @@ def _initialize_captured_observations(observations, as_of):
             and bool(raw.get('hostedUrl')) and bool(raw.get('descriptionPlain') or raw.get('description'))
         )
         if native_full and not job.title_truncated:
+            from .posting_deadlines import has_elapsed_deadline
+            expired = has_elapsed_deadline(raw, as_of)
             observation.identity_state = 'exact'
             observation.content_state = 'complete'
-            observation.application_route_state = 'observed_public_route'
-            observation.vacancy_state = 'explicitly_closed' if raw.get('isListed') is False else 'verified_open'
-            observation.verified_open_at = as_of
+            observation.application_route_state = 'account_unknown' if expired else 'observed_public_route'
+            # Ashby isListed=false means a published direct-link-only posting,
+            # not a closed vacancy. Captured deadlines are closure evidence.
+            observation.vacancy_state = 'explicitly_closed' if expired else 'verified_open'
+            observation.verified_open_at = None if expired else as_of
         else:
             observation.content_state = 'snippet_only' if observation.source in {'serp', 'adzuna', 'jsearch'} else 'partial'
 

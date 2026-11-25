@@ -14,7 +14,8 @@ review budgets. Current operation does not depend on completing every item here.
 | Source expansion | Shared HTTP/logical budgets, cadence and adequately covered-check records; readers do not automatically admit new daily sources |
 | Local workflow | Named profiles, isolated data directories, `local doctor`, fictional demo, reviewed-file commands and closed-state backup/restore |
 | Security fixes | Verified SMTP/IMAP TLS, validated-IP public connections, proxy rejection and parent-bound hydration evidence |
-| Digest quality | Resource/roundup and hosted-copy exclusions, shared headline/compact floor, historical buyer demand and separate fit/role labels |
+| Digest quality | Resource/roundup and hosted-copy exclusions, native source/clock/deadline semantics, social and occupation boundaries, matched-candidate totals and saved-run fingerprints |
+| Run diagnostics | Whole-cohort readiness and missing-fact summaries, collection coverage, compact review exports and reproducible snapshot hashes; independent accuracy remains unmeasured |
 | Public distribution | Current source, synthetic tests, neutral starter, separate fictional demo policies and publication checks; no license selected |
 
 The implementation and focused tests for these areas are shipped. That is not

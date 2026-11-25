@@ -25,12 +25,42 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from ..models import Job
-from ..normalize import company_from_job_url, normalize, _parse_dt, _description
+from ..normalize import company_from_job_url, normalize, _parse_dt
 from ..document_regions import role_markup, PlainFormBoundaryError
 from ..text import html_to_text
 from .models import ListingObservation, SourceKind
 from .provenance import sanitize_payload, sanitize_url
 from .evidence_dimensions import public_page_kind, work_arrangement, project_observation
+from .posting_deadlines import has_elapsed_deadline
+
+
+GREENHOUSE_PUBLIC_HOSTS = frozenset({
+    "boards.greenhouse.io", "job-boards.greenhouse.io",
+    "boards.eu.greenhouse.io", "job-boards.eu.greenhouse.io",
+})
+
+
+def native_posting_route(url: str) -> tuple[str, str, str, str] | None:
+    """An exact supported ATS leaf and its documented public read endpoint.
+
+    EU-hosted Greenhouse postings are served by the same Job Board API; the
+    hosted page itself need not expose JobPosting structured data. A board
+    index never supplies the identity of an individual vacancy.
+    """
+    parts = urlsplit(url)
+    host = (parts.hostname or "").casefold()
+    seg = [part for part in parts.path.split("/") if part]
+    if host in GREENHOUSE_PUBLIC_HOSTS and len(seg) == 3 and seg[1] == "jobs":
+        return ("greenhouse", seg[0], seg[2],
+                f"https://boards-api.greenhouse.io/v1/boards/{seg[0]}/jobs/{seg[2]}")
+    if host == "jobs.ashbyhq.com" and len(seg) >= 2:
+        return ("ashby", seg[0], seg[1],
+                f"https://api.ashbyhq.com/posting-api/job-board/{seg[0]}")
+    if host in {"jobs.lever.co", "jobs.eu.lever.co"} and len(seg) >= 2:
+        api_host = "api.eu.lever.co" if host == "jobs.eu.lever.co" else "api.lever.co"
+        return ("lever", seg[0], seg[1],
+                f"https://{api_host}/v0/postings/{seg[0]}/{seg[1]}")
+    return None
 
 
 @dataclass(frozen=True)
@@ -399,16 +429,10 @@ async def resolve_public_original(client: httpx.AsyncClient, budget: RetrievalBu
     if final_host not in {"adzuna.in", "www.adzuna.in"}:
         return final, None, trail
     parser = _LeafParser(); parser.feed(response.text)
-    known = {"jobs.ashbyhq.com", "boards.greenhouse.io", "job-boards.greenhouse.io",
-             "jobs.lever.co", "jobs.eu.lever.co"}
     candidates = []
     for href in parser.hrefs:
-        target = sanitize_url(urljoin(final, href)); host = (urlsplit(target).hostname or "").casefold()
-        segments = [p for p in urlsplit(target).path.split("/") if p]
-        exact_shape = (("greenhouse.io" in host and len(segments) >= 3 and segments[-2] == "jobs")
-                       or (host == "jobs.ashbyhq.com" and len(segments) >= 2)
-                       or (host in {"jobs.lever.co", "jobs.eu.lever.co"} and len(segments) >= 2))
-        if host in known and exact_shape and _safe_public_http(target):
+        target = sanitize_url(urljoin(final, href))
+        if native_posting_route(target) is not None and _safe_public_http(target):
             candidates.append(target)
     candidates = sorted(set(candidates))
     if len(candidates) != 1:
@@ -536,7 +560,10 @@ def _posting_salary(payload: dict) -> str | None:
 def _generic_job(payload: dict, public_url: str, body: str) -> Job | None:
     from ..config import CONFIG
     org = payload.get("hiringOrganization") or {}
-    remote_type = str(payload.get('jobLocationType') or '').casefold() == 'telecommute'
+    location_types = payload.get('jobLocationType') or []
+    if not isinstance(location_types, list):
+        location_types = [location_types]
+    remote_type = any(str(value).casefold() == 'telecommute' for value in location_types)
     eligible = payload.get('applicantLocationRequirements')
     location = _posting_location(eligible if remote_type and eligible else payload.get('jobLocation') or eligible)
     description = str(payload.get("description") or "")
@@ -564,6 +591,8 @@ def _generic_job(payload: dict, public_url: str, body: str) -> Job | None:
 
 def _exact_identity(original: Job, hydrated: Job, posting_id: str, payload: dict) -> str:
     candidate_id = str(payload.get("id") or payload.get("job_id") or payload.get("postingId") or "")
+    if posting_id and candidate_id and posting_id != candidate_id:
+        return "conflict"
     old_title = (original.title or "").casefold().strip()
     new_title = (hydrated.title or "").casefold().strip()
     old_url, new_url = urlsplit(original.url or ""), urlsplit(hydrated.url or "")
@@ -585,7 +614,17 @@ def _exact_identity(original: Job, hydrated: Job, posting_id: str, payload: dict
 
     old_company = company_identity(original.company)
     new_company = company_identity(hydrated.company)
-    if old_company and new_company and old_company != new_company:
+    # SERP normalization uses the ATS board slug as a company hint. The
+    # publisher's exact native posting may supply the spaced/legal name later;
+    # our own inferred hint is not independent contradictory employer evidence.
+    original_route = native_posting_route(original.url)
+    inferred_board_company = (
+        original.source == "serp" and original_route is not None
+        and original_route == native_posting_route(hydrated.url)
+        and posting_id == candidate_id == original_route[2]
+        and old_company == company_identity(company_from_job_url(original.url))
+    )
+    if old_company and new_company and old_company != new_company and not inferred_board_company:
         return "conflict"
     old_words = set(re.findall(r"[a-z0-9]+", old_title)) - {"remote", "job", "role"}
     new_words = set(re.findall(r"[a-z0-9]+", new_title)) - {"remote", "job", "role"}
@@ -624,16 +663,9 @@ async def hydrate_public_posting(
     request_url = ""
     source = ""
     posting_id = ""
-    if host == "jobs.ashbyhq.com" and len(seg) >= 2:
-        source, posting_id = "ashby", seg[1]
-        request_url = f"https://api.ashbyhq.com/posting-api/job-board/{seg[0]}"
-    elif host in {"boards.greenhouse.io", "job-boards.greenhouse.io"} and len(seg) >= 3 and seg[-2] == "jobs":
-        source, posting_id = "greenhouse", seg[-1]
-        request_url = f"https://boards-api.greenhouse.io/v1/boards/{seg[0]}/jobs/{posting_id}"
-    elif host in {"jobs.lever.co", "jobs.eu.lever.co"} and len(seg) >= 2:
-        source, posting_id = "lever", seg[1]
-        api_host = "api.eu.lever.co" if host == "jobs.eu.lever.co" else "api.lever.co"
-        request_url = f"https://{api_host}/v0/postings/{seg[0]}/{posting_id}"
+    route = native_posting_route(public)
+    if route is not None:
+        source, _board, posting_id, request_url = route
     else:
         source = "first_party"
         request_url = public
@@ -643,7 +675,7 @@ async def hydrate_public_posting(
             try:
                 cached_at = datetime.fromisoformat(str(cached["captured_at"]).replace("Z", "+00:00"))
                 age_hours = (datetime.now(timezone.utc) - cached_at).total_seconds() / 3600
-                if age_hours > budget.policy.cache_ttl_hours:
+                if age_hours < 0 or age_hours > budget.policy.cache_ttl_hours:
                     cached = None
             except (KeyError, TypeError, ValueError):
                 cached = None
@@ -728,11 +760,7 @@ def _parse_posting_response(response, *, source, public, request_url, posting_id
         notice = _scoped_closure(response.text, hydrated.title) if CONFIG.v55.enabled and identity in {'exact', 'corroborated'} else None
         if notice:
             payload = dict(payload, _closure_evidence=notice)
-        valid = payload.get("validThrough")
-        explicitly_closed = payload.get("isListed") is False or notice is not None
-        if valid:
-            try: explicitly_closed = explicitly_closed or datetime.fromisoformat(str(valid).replace("Z", "+00:00")) < datetime.now(timezone.utc)
-            except (TypeError, ValueError): pass
+        explicitly_closed = notice is not None or has_elapsed_deadline(payload, datetime.now(timezone.utc))
         links = _LeafParser(); links.feed(response.text)
         apply_observed = any("apply" in (href or "").casefold() and _safe_public_http(sanitize_url(urljoin(public, href))) for href in links.hrefs)
         return HydrationResult(state="complete", job=hydrated, source=source, request_url=request_url, public_url=public, payload=sanitize_payload(payload), identity_state=identity,
@@ -751,35 +779,21 @@ def _parse_posting_response(response, *, source, public, request_url, posting_id
         if payload is None:
             return HydrationResult(state="unavailable", source=source, request_url=request_url, public_url=public, error="posting_not_found")
         payload = dict(payload, _slug=seg[0], _company=company_from_job_url(public))
-    normalized_payload = payload
-    if source == "lever" and isinstance(payload, dict):
-        from ..config import CONFIG
-        named = []
-        for block in payload.get("lists") or []:
-            if isinstance(block, dict):
-                content = str(block.get('content') or '')
-                content = html_to_text(content, role_only=True) if CONFIG.v55.enabled else re.sub(r'<[^>]+>', ' ', content)
-                named.append(f"{block.get('text') or ''}\n{content}")
-        if named:
-            normalized_payload = dict(payload)
-            normalized_payload["descriptionPlain"] = "\n".join(filter(None, [
-                _description(payload.get('descriptionPlain'),payload.get('description')) if CONFIG.v55.enabled else str(payload.get("descriptionPlain") or ""), *named
-            ]))
-            if not CONFIG.v55.enabled:
-                payload = normalized_payload
     if not isinstance(payload, dict):
         return HydrationResult(state="failed", source=source, request_url=request_url, public_url=public, error="invalid_payload")
     try:
-        hydrated = normalize({"source": source, "raw": normalized_payload})
+        hydrated = normalize({"source": source, "raw": payload})
     except (KeyError, TypeError, ValueError) as exc:
         return HydrationResult(state="failed", source=source, request_url=request_url, public_url=public, error=f"normalize_{type(exc).__name__}")
     if hydrated is None:
         return HydrationResult(state="failed", source=source, request_url=request_url, public_url=public, error="unusable_hydration")
     hydrated.url = public
     identity = _exact_identity(original, hydrated, posting_id, payload)
+    explicitly_closed = has_elapsed_deadline(payload, datetime.now(timezone.utc))
     return HydrationResult(state="complete", job=hydrated, source=source, request_url=request_url, public_url=public, payload=sanitize_payload(payload), identity_state=identity,
                            captured_at=cached_at if cached else datetime.now(timezone.utc), from_cache=bool(cached),
-                           vacancy_state="verified_open", application_route_state="observed_public_route",
+                           vacancy_state="explicitly_closed" if explicitly_closed else "verified_open",
+                           application_route_state="account_unknown" if explicitly_closed else "observed_public_route",
                            task_availability_state="advertised_only")
 
 

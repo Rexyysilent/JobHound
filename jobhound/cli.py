@@ -482,6 +482,21 @@ def cmd_replay(args: argparse.Namespace) -> None:
         print(f"V3/V4.2 comparison: {comparison_path}")
 
 
+def _print_quality_exports(output_dir, manifest_name: str) -> None:
+    import json
+    target = Path(output_dir).resolve()
+    manifest_path = target / manifest_name
+    if not manifest_path.is_file():
+        return
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for key, label in (("compact_audit", "Compact audit"), ("quality_report", "Run quality report")):
+        if manifest.get(key):
+            print(f"{label}: {target / manifest[key]}")
+        elif key in manifest.get("quality_export_status", {}):
+            status = manifest["quality_export_status"][key]
+            print(f"{label}: {status['status']} ({status['bytes']} bytes; limit {status['limit_bytes']})")
+
+
 def cmd_review_capture(args: argparse.Namespace) -> None:
     """Live public capture into an isolated namespace; never opens a store."""
     from .v41.review import capture_review
@@ -494,6 +509,7 @@ def cmd_review_capture(args: argparse.Namespace) -> None:
     ))
     print(f"Isolated review snapshot: {snapshot}")
     print(f"Isolated review digest: {digest}")
+    _print_quality_exports(args.output_dir, "manifest.json")
 
 
 def cmd_review_replay(args: argparse.Namespace) -> None:
@@ -502,6 +518,7 @@ def cmd_review_replay(args: argparse.Namespace) -> None:
     output, fingerprint = replay_review(args.snapshot, args.output_dir)
     print(f"Offline review digest: {output}")
     print(f"Decision fingerprint: {fingerprint}")
+    _print_quality_exports(args.output_dir, "replay_manifest.json")
 
 
 def cmd_review_outcomes(args: argparse.Namespace) -> None:

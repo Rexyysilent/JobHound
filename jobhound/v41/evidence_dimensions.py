@@ -12,7 +12,54 @@ from ..filters.listing_quality import BOARD_DOMAINS, domain_tier
 from ..normalize import company_domain_from_job_url
 from .models import Evidence, EvidenceDimension, SourceKind
 
-PROJECTION_VERSION = "evidence-v1"
+PROJECTION_VERSION = "evidence-v2"
+
+_REMOTE_ROLE_CLAUSE = re.compile(
+    r'^(?:'
+    r'(?:this|the)\s+(?:current\s+)?(?:role|position|job|contract)\s+'
+    r'(?:is|will\s+be|can\s+be|may\s+be)\s+'
+    r'(?:on[- ]?site\s+or\s+)?(?:(?:fully|entirely|100\s*%)\s+)?remote\b|'
+    r'(?:fully|100\s*%)\s+remote\s+(?:[a-z-]+\s+){0,3}'
+    r'(?:role|position|job|work|contract)\b|'
+    r'remote\s+(?:applicants|candidates)\b[^.!?;\n]{0,100}\b(?:may|can)\s+apply\b|'
+    r'(?:fully\s+)?remote\s+(?:applicants|candidates)\s+(?:are\s+)?accepted\b|'
+    r'(?:you|applicants|candidates|contractors)\s+(?:may|can|will)\s+'
+    r'work\s+(?:remotely|from\s+(?:home|anywhere))\b'
+    r')', re.I,
+)
+_REMOTE_LOCATION_CLAUSE = re.compile(
+    r'^(?:(?:work(?:ing)?\s+)?(?:location|arrangement)\s*:\s*)?'
+    r'(?:(?:fully|entirely|100\s*%)\s+)?remote\s+(?:in\s+)?'
+    r'(?:india|worldwide|global(?:ly)?|anywhere|apac|asia)'
+    r'(?:\s+only)?'
+    r'(?:\s+(?:applicants|candidates)\s+(?:may|can)\s+apply)?$',
+    re.I,
+)
+_REMOTE_TASK_CONTEXT = re.compile(
+    r'^(?:(?:this|the)\s+(?:role|position|job|contract|project|assignment)\b|'
+    r'(?:buyer|client)\s+(?:needs|requests|seeks)\b|'
+    r'(?:job|role)\s+(?:description|duties|scope)\s*:)',
+    re.I,
+)
+
+
+def _role_remote_clause(clause: str) -> bool:
+    """Resolve a broad native flag only with a current role's remote terms."""
+    if re.search(r'\b(?:not|never|no\s+longer)\s+'
+                 r'(?:available|offered|supported|permitted|allowed|accepted|possible)\b',
+                 clause, re.I):
+        return False
+    if _REMOTE_ROLE_CLAUSE.search(clause) or _REMOTE_LOCATION_CLAUSE.fullmatch(clause):
+        return True
+    # A compact trailing location label also occurs in scoped project prose.
+    # Retain its subject: splitting every comma would promote company/team
+    # boilerplate or the consequence of a negated or conditional statement.
+    context, separator, label = clause.rpartition(',')
+    return bool(separator and _REMOTE_LOCATION_CLAUSE.fullmatch(label.strip())
+                and _REMOTE_TASK_CONTEXT.search(context)
+                and not re.search(r'\b(?:not|never|no\s+longer|previously|formerly|'
+                                  r'if|unless|might|would|company|teams?|culture)\b',
+                                  context, re.I))
 
 
 def public_page_kind(url: str) -> SourceKind:
@@ -45,10 +92,11 @@ def work_arrangement(job, payload: dict, observation_id: str = "", source_kind=N
     for value in values:
         if str(value).upper() == 'TELECOMMUTE':
             add('remote', 'jobLocationType', value)
+    native = str(payload.get('workplaceType') or '').casefold()
+    ashby_remote = job.source == 'ashby' and payload.get('isRemote') is True
     for key in ('isRemote', 'job_is_remote'):
         if payload.get(key) is True:
-            add('remote', key, 'true')
-    native = str(payload.get('workplaceType') or '').casefold()
+            add('remote_or_hybrid' if key == 'isRemote' and ashby_remote else 'remote', key, 'true')
     if native in {'remote', 'hybrid', 'on-site', 'onsite'}:
         add('onsite' if native in {'on-site', 'onsite'} else native, 'workplaceType', native)
     # Only role-scoped text; a company having remote employees proves nothing.
@@ -59,20 +107,31 @@ def work_arrangement(job, payload: dict, observation_id: str = "", source_kind=N
             add('onsite', field, text)
         elif re.search(r'\b(?:remote(?!\s+(?:sensing|control|desktop|access)\b)|work from home)\b', text, re.I):
             add('remote', field, text)
-    explicit = {c.value for c in claims}
-    if len(explicit) > 1:
+    if ashby_remote and native not in {'remote', 'hybrid', 'on-site', 'onsite'}:
+        # A role-specific sentence can resolve the broad Ashby flag. Generic
+        # remote-company boilerplate and quoted examples cannot establish it.
+        role_text = re.sub(r'"[^"\n]*"|“[^”\n]*”', '.', job.description or '')
+        for clause in re.split(r'[.!?;\n]', role_text):
+            clause = re.sub(r'^[\s•*-]+', '', clause).strip()
+            if _role_remote_clause(clause):
+                add('remote', 'description', clause)
+    explicit = {c.value for c in claims if c.value != 'remote_or_hybrid'}
+    if len(explicit) > 1 or (ashby_remote and 'onsite' in explicit):
         state = 'conflicting'
     elif explicit:
         state = next(iter(explicit))
-    elif job.is_remote:
+    elif job.is_remote and not ashby_remote:
         state = 'remote'
         add('remote', 'normalized.is_remote', 'true', 'inferred')
     else:
         # False in the legacy boolean means no detected remote signal, NOT onsite.
         state = 'unknown'
+    caveats = ['Remote work does not establish applicant-country eligibility.']
+    if ashby_remote and not explicit:
+        caveats.append('Ashby isRemote includes hybrid roles; confirm workplaceType or explicit fully remote terms.')
     return EvidenceDimension(state=state, value=state, claims=claims,
         observation_ids=[observation_id] if observation_id else [],
-        caveats=['Remote work does not establish applicant-country eligibility.'])
+        caveats=caveats)
 
 
 def project_observation(observation):

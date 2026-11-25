@@ -243,12 +243,19 @@ def main(argv: list[str] | None = None) -> None:
     compare = commands.add_parser("compare")
     compare.add_argument("before")
     compare.add_argument("after")
+    quality = commands.add_parser("quality", help="Summarize the whole saved cohort and evidence gaps")
+    quality.add_argument("audit")
+    quality.add_argument("--top", type=int, default=15,
+                         help="Maximum missing-fact and source groups to show (1–100)")
     args = parser.parse_args(argv)
     try:
         if args.command == "validate":
             data = load_audit(args.audit)
             output = {"schema": SCHEMA, "valid": True, "rows": len(data["decisions"]),
                       "fingerprint": fingerprint(data), "warnings": validate_audit(data)}
+        elif args.command == "quality":
+            from .quality import quality_report
+            output = quality_report(load_audit(args.audit), top_limit=args.top)
         else:
             output = compare_audits(load_audit(args.before), load_audit(args.after))
         print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))

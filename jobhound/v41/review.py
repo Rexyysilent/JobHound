@@ -19,6 +19,7 @@ import httpx
 import errno
 import os
 import hashlib
+import tempfile
 
 
 def _namespace(path: Path | str) -> Path:
@@ -140,6 +141,52 @@ def _write_audit(result, target: Path) -> Path:
     return path
 
 
+def _write_quality_exports(result, target: Path, snapshot: Path) -> dict:
+    """Add bounded, decision-complete review artifacts without changing audit.json."""
+    from ..compact_audit import compact_audit
+    from ..quality import quality_report
+    from ..review_audit import MAX_BYTES, canonical_json
+
+    with snapshot.open('rb') as stream:
+        snapshot_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
+    compact = compact_audit(result, snapshot_reference=str(snapshot.resolve()),
+                            snapshot_sha256=snapshot_sha256)
+    quality = quality_report(compact)
+    exports = {'compact_audit': ('audit.compact.json', compact),
+               'quality_report': ('quality.json', quality)}
+    encoded = {key: canonical_json(payload).encode('utf-8')
+               for key, (_, payload) in exports.items()}
+    receipt = {'snapshot_sha256': snapshot_sha256, 'quality_export_status': {}}
+    for key, (name, _) in exports.items():
+        receipt['quality_export_status'][key] = {
+            'status': 'written' if len(encoded[key]) <= MAX_BYTES else 'omitted_size_limit',
+            'bytes': len(encoded[key]), 'limit_bytes': MAX_BYTES,
+        }
+        if len(encoded[key]) > MAX_BYTES:
+            # Do not fail a completed capture or present an older compact file
+            # as this run's output when the review namespace is reused.
+            (target / name).unlink(missing_ok=True)
+            receipt[key] = None
+            receipt[key + '_sha256'] = None
+            continue
+        # Replacement preserves reusable review directories; exclusive public
+        # compact exports retain their existing no-overwrite API contract.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=target, prefix='.quality-', delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(encoded[key])
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target / name)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        receipt[key] = name
+        receipt[key + '_sha256'] = hashlib.sha256(encoded[key]).hexdigest()
+    return receipt
+
+
 def _checkpoint_raw(raw: list[dict], health: list, target: Path) -> tuple[Path, Path, datetime]:
     """Save replayable sanitized discovery before fallible evaluation."""
     path = target / "raw_discovery.json"
@@ -247,6 +294,7 @@ async def _capture_review(
         directory=target,
     )
     audit_path = _write_audit(result, target)
+    quality_exports = _write_quality_exports(result, target, snapshot)
     hydration_path = target / "hydration_report.json"
     hydration_path.write_text(json.dumps(
         sanitize_payload(hydration_report), ensure_ascii=False, indent=2, sort_keys=True
@@ -262,7 +310,7 @@ async def _capture_review(
         "delivery_called": False,
         "context_fingerprint": current_run().fingerprint(),
         "request_budget": transport.budget.receipt(),
-        "snapshot_sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+        **quality_exports,
     }
     (target / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return snapshot, digest_path
@@ -284,6 +332,7 @@ def replay_review(snapshot: Path | str, output_dir: Path | str) -> tuple[Path, s
     output = target / f"replay_{Path(snapshot).stem}.md"
     output.write_text(digest.text, encoding="utf-8")
     audit_path = _write_audit(result, target)
+    quality_exports = _write_quality_exports(result, target, Path(snapshot))
     fingerprint = decision_fingerprint(result)
     (target / "replay_manifest.json").write_text(json.dumps({
         "mode": "offline_review_replay",
@@ -296,5 +345,6 @@ def replay_review(snapshot: Path | str, output_dir: Path | str) -> tuple[Path, s
         "llm_allowed": False,
         "production_store_called": False,
         "delivery_called": False,
+        **quality_exports,
     }, indent=2, sort_keys=True), encoding="utf-8")
     return output, fingerprint

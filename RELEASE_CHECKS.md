@@ -1,12 +1,13 @@
 # Public source verification
 
-Prepared October 18, 2026 from the current cumulative implementation. This is a
-regression-verified development source update, not independent recommendation
-quality or a certification of all security properties.
+Verification records for the public implementation, updated November 25, 2026.
+These are regression-verified development changes, not independent recommendation
+quality measurements or a certification of all security properties.
 
 ## Included implementation
 
-- All **99 Python package modules** from the current implementation are included.
+- The October 18 public export included all **99 Python package modules** from
+  that implementation.
   After line-ending normalization, 97 have identical source text; two differ
   only by removal of private project/network references in docstrings. No
   runtime algorithm or security fix is removed for publication.
@@ -42,6 +43,48 @@ quality or a certification of all security properties.
   placeholders. Exact configured private values can never be waived.
 
 ## Verification
+
+### November 25, 2026: job-search accuracy and run diagnostics
+
+- Clean public `main` baseline `0b58bad2b45f9982edee18107ab0658d9ed1803f`:
+  **2,634 passed, 2 skipped** on Python 3.12.14.
+- Updated full offline suite: **2,868 passed, 2 skipped** in 96.67 seconds on
+  Python 3.12.14. The change adds **234 regression cases**, including native
+  provider semantics, same-run verification time, deadline supersession,
+  country/occupation/document boundaries, diagnostic evidence completeness,
+  bounded exports and frozen digest provenance.
+- The two local skips are the Windows batch launcher and a historical live
+  review cache that is not distributed. The test harness uses synthetic
+  policies, blank provider credentials, disposable stores and blocked external
+  sockets. Ambient proxy variables were removed for this offline execution so
+  an unrelated fake-client fixture did not require optional SOCKS dependencies.
+- Acceptance adapter: **100 outputs, 0 errors**. Contract evaluator:
+  **100 cases, 204 assertions passed**. Acceptance inputs and assertions were
+  unchanged. Four initially failing positive cases exposed common explicit
+  remote-location phrases missing from the new Ashby interpretation; the
+  production parser was corrected and negative-context controls added.
+- An isolated synthetic comparison held all other modules current and replaced
+  only the resolver: the baseline rejected a successful same-run opening check
+  as future evidence (`VERIFY`); the updated resolver accepted that evidence
+  (`APPLY`) when all other requirements passed. Future captures, stale cache and
+  a deadline crossed before retrieval completion remain negative controls.
+- CLI smoke verification initialized a separate fictional profile and completed
+  the local demo with **zero network/provider calls**, successful SQLite
+  integrity checks and distinct application, assessment, clarification and
+  waiting actions. Two offline replays produced identical decision fingerprints.
+  Both export manifests matched their compact/quality file hashes, and the
+  standalone quality command exactly matched the saved quality report.
+- Full and compact quality diagnostics use the same pure posting-status logic
+  as the engine. Renewed native deadlines do not leave a false closed warning;
+  explicit closure notices and future observations retain their boundaries.
+- The main README, starter configuration, acceptance expectations and workflow
+  configuration are unchanged. No private messages, profiles, run captures or
+  delivery state are part of the patch.
+
+See [job-search accuracy](docs/job_search_accuracy.md) and
+[run-quality diagnostics](docs/run_quality.md). These checks establish specific
+regressions and workflow behavior; independent precision, recall and current
+live source coverage remain unmeasured.
 
 ### October 23, 2026: posting identity
 

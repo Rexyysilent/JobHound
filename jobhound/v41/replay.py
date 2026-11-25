@@ -75,6 +75,16 @@ def write_snapshot(
     }
     if result.metadata.engine_version == "v5.0.0-rc1":
         header["release_policy"] = release_policy_payload()
+        # Evaluation may advance to the end of live hydration. Keep earlier
+        # discovery check times instead of stamping them with that later cut
+        # when replay reconstructs native observations from their raw fields.
+        header["discovery_observation_times"] = {
+            observation.observation_id: {
+                "captured_at": observation.captured_at.isoformat() if observation.captured_at else None,
+                "verified_open_at": observation.verified_open_at.isoformat() if observation.verified_open_at else None,
+            }
+            for observation in result.observations if observation.origin == "discovery"
+        }
         header["account_state_observations"] = [
             sanitize_payload(observation.model_dump(mode="json"))
             for observation in result.observations
@@ -172,6 +182,20 @@ def replay(path: Path | str) -> RunResult:
     with run_scope(context):
         seed = evaluate_raw(raw, as_of=as_of)
         observations = list(seed.observations)
+        saved_times = header.get("discovery_observation_times")
+        if isinstance(saved_times, dict):
+            from .action_policy import timestamp
+            for observation in observations:
+                times = saved_times.get(observation.observation_id)
+                if not isinstance(times, dict):
+                    continue
+                for field in ("captured_at", "verified_open_at"):
+                    if field not in times:
+                        continue
+                    value = times[field]
+                    parsed = timestamp(value)
+                    if value is None or (parsed is not None and parsed <= as_of):
+                        setattr(observation, field, parsed)
         for encoded in [*(header.get("hydration_observations") or []),
                         *(header.get("account_state_observations") or [])]:
             try:
@@ -179,7 +203,7 @@ def replay(path: Path | str) -> RunResult:
             except (TypeError, ValueError):
                 continue
         result = (evaluate_observations(observations, as_of=as_of, raw_count=len(raw))
-                  if len(observations) != len(seed.observations) else seed)
+                  if len(observations) != len(seed.observations) or isinstance(saved_times, dict) else seed)
     result.source_health = list(
         header.get("source_health") or []
     )

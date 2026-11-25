@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
+from html import escape
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from .config import CONFIG
@@ -465,29 +467,115 @@ def _norm_greenhouse(raw: dict) -> Job:
         location=loc or None,
         is_remote=is_remote,
         region_tags=region,
-        posted_at=_parse_dt(raw.get("first_published") or raw.get("updated_at")),
+        # Editing an old posting does not make it a newly published vacancy.
+        # updated_at remains in the captured native payload, not posting age.
+        posted_at=_parse_dt(raw.get("first_published")),
         pay_raw=None,  # Greenhouse boards rarely expose structured salary
     )
 
 
+def _lever_description(raw: dict) -> str:
+    """Assemble all native role sections without changing the provider payload.
+
+    Lever's combined description contains the opening and body, but excludes
+    the named requirement/benefit lists and closing content. Those sections
+    must pass through the same role/form boundary checks as the main body.
+    """
+    description = _description(raw.get("descriptionPlain"), raw.get("description"))
+    if not description:
+        description = "\n\n".join(filter(None, (
+            _description(raw.get("openingPlain"), raw.get("opening")),
+            _description(raw.get("descriptionBodyPlain"), raw.get("descriptionBody")),
+        )))
+    sections = [description] if description else []
+    blocks = raw.get("lists")
+    for block in blocks if isinstance(blocks, list) else []:
+        if not isinstance(block, dict):
+            continue
+        heading, content = block.get("text"), block.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        heading = heading if isinstance(heading, str) else ""
+        # A named list is a native section: keep its heading with its body so
+        # explicit application-form boundaries cannot escape across fields.
+        section = _strip_html(f"<h2>{escape(heading)}</h2>\n{content}")
+        if section:
+            sections.append(section)
+    for plain, markup in (("additionalPlain", "additional"),
+                          ("salaryDescriptionPlain", "salaryDescription")):
+        section = _description(raw.get(plain), raw.get(markup))
+        if section:
+            sections.append(section)
+    return "\n\n".join(sections)
+
+
+def _lever_salary(raw: dict) -> str | None:
+    """Keep stated currency, bounds and units; absent data remains unknown."""
+    salary = raw.get("salaryRange")
+    if not isinstance(salary, dict):
+        return None
+    currency = salary.get("currency")
+    if not isinstance(currency, str) or not re.fullmatch(r"[A-Za-z]{3}", currency):
+        return None
+
+    def amount(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            return None
+        if isinstance(value, str) and (len(value) > 80 or not re.fullmatch(r"\d+(?:\.\d+)?", value)):
+            return None
+        try:
+            number = Decimal(str(value))
+        except InvalidOperation:
+            return None
+        return number if number.is_finite() and number >= 0 else None
+
+    low, high = amount(salary.get("min")), amount(salary.get("max"))
+    if any(salary.get(key) is not None and parsed is None
+           for key, parsed in (("min", low), ("max", high))):
+        return None
+    if low is not None and high is not None:
+        if low > high:
+            return None
+        literal = f"{currency.upper()} {low:f} - {high:f}"
+    elif low is not None:
+        literal = f"at least {currency.upper()} {low:f}"
+    elif high is not None:
+        literal = f"up to {currency.upper()} {high:f}"
+    else:
+        return None
+    interval = str(salary.get("interval") or "").strip().casefold()
+    units = {
+        "hour": "hour", "hourly": "hour", "per-hour-wage": "hour",
+        "day": "day", "daily": "day", "per-day-wage": "day",
+        "week": "week", "weekly": "week", "per-week-wage": "week",
+        "month": "month", "monthly": "month", "per-month-wage": "month",
+        "year": "year", "yearly": "year", "annual": "year", "annually": "year",
+        "per-year-salary": "year",
+    }
+    for unit in ("hour", "day", "week", "month", "year"):
+        units.update({f"per{separator}{unit}{suffix}": unit
+                      for separator in (" ", "-")
+                      for suffix in ("", separator + "wage", separator + "salary")})
+    unit = units.get(interval)
+    # Amounts without a supported interval are still useful evidence, but do
+    # not acquire an annual denominator or pass an hourly-pay threshold.
+    suffix = f" per {unit}" if unit else ""
+    return literal + suffix
+
+
 def _norm_lever(raw: dict) -> Job:
-    desc = _description(raw.get("descriptionPlain"), raw.get("description"))
+    desc = _lever_description(raw)
     cats = raw.get("categories") or {}
-    loc = ", ".join(p for p in (cats.get("location"), raw.get("country")) if p)
+    alternatives = cats.get("allLocations")
+    alternatives = alternatives if isinstance(alternatives, list) else []
+    locations = [cats.get("location"), *alternatives, raw.get("country")]
+    loc = ", ".join(dict.fromkeys(p.strip() for p in locations if isinstance(p, str) and p.strip()))
     title = (raw.get("text") or "").strip()
     is_remote = remote_signal(
         f"{title}\n{loc}", explicit=raw.get("workplaceType") == "remote"
     )
     body = f"{loc} {cats.get('department') or ''} {cats.get('team') or ''} {desc[:2000]}"
     region = _detect_region_tags(title, body, is_remote=is_remote)
-    pay_raw = None
-    sr = raw.get("salaryRange") or {}
-    if sr.get("min") or sr.get("max"):
-        lo, hi = sr.get("min") or sr.get("max"), sr.get("max") or sr.get("min")
-        interval = str(sr.get("interval") or "")
-        per = ("per hour" if "hour" in interval else
-               "per month" if "month" in interval else "per year")
-        pay_raw = f"{sr.get('currency') or 'USD'} {lo} - {hi} {per}"
     return Job(
         source="lever",
         title=title,
@@ -498,7 +586,7 @@ def _norm_lever(raw: dict) -> Job:
         is_remote=is_remote,
         region_tags=region,
         posted_at=_parse_dt(raw.get("createdAt")),
-        pay_raw=pay_raw,
+        pay_raw=_lever_salary(raw),
     )
 
 
@@ -508,7 +596,11 @@ def _norm_ashby(raw: dict) -> Job:
                  for s in raw.get("secondaryLocations") or []]
     loc = ", ".join(p for p in [raw.get("location"), *secondary] if p)
     title = (raw.get("title") or "").strip()
-    is_remote = bool(raw.get("isRemote")) or raw.get("workplaceType") == "Remote"
+    workplace = str(raw.get("workplaceType") or "").casefold()
+    # Ashby's broad isRemote flag is true for Hybrid as well as Remote.
+    # A missing workplaceType remains a possible remote lead; the evidence
+    # projection keeps that remote-or-hybrid ambiguity explicit.
+    is_remote = workplace == "remote" if workplace in {"remote", "hybrid", "onsite", "on-site"} else raw.get("isRemote") is True
     region = _detect_region_tags(title, f"{loc} {desc[:2000]}", is_remote=is_remote)
     comp = raw.get("compensation") or {}
     pay_raw = comp.get("scrapeableCompensationSalarySummary") or None

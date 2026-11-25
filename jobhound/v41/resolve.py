@@ -10,7 +10,7 @@ import hashlib
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
@@ -36,6 +36,8 @@ from .hydration import (
     child_observation,
     hydrate_public_posting,
     resolve_public_original,
+    native_posting_route,
+    GREENHOUSE_PUBLIC_HOSTS,
 )
 
 _ADZUNA_HOSTS = {"adzuna.in", "www.adzuna.in"}
@@ -46,7 +48,7 @@ _ATS_HOSTS = {
     "jobs.lever.co",
     "jobs.eu.lever.co",
     "apply.workable.com",
-}
+} | GREENHOUSE_PUBLIC_HOSTS
 _OUTBOUND_SKIP_HOSTS = {
     "facebook.com",
     "www.facebook.com",
@@ -648,7 +650,17 @@ async def hydrate_result(
         and not (budget.verification_cycles.get(state_key(item), 0) >= max_cycles
                  and budget.verification_next_check.get(state_key(item), 0) > as_of_ts)
     ]
-    eligible.sort(key=lambda row: (row.decision.priority_key.sort_tuple, row.canonical.canonical_id))
+    # Exact native leaves can resolve title-only discovery in one public read.
+    # Spend scarce verification slots there before an equally unresolved copy,
+    # while keeping readiness and source diversity and retaining all other leads.
+    def verification_priority(row):
+        return (row.decision.action_band == ActionBand.REJECT,
+                -row.decision.priority_key.action_readiness,
+                native_posting_route(row.job.url) is None,
+                row.decision.priority_key.sort_tuple,
+                row.canonical.canonical_id)
+
+    eligible.sort(key=verification_priority)
     reserve = min(len(eligible), math.ceil(policy.shortlist * getattr(getattr(CONFIG, "v55", None), "soft_reject_reserve_fraction", .1)))
     rejected = [row for row in eligible
                 if row.decision.action_band == ActionBand.REJECT
@@ -661,7 +673,7 @@ async def hydrate_result(
         buckets.setdefault(row.canonical.best_observation.source, []).append(row)
     diverse = []
     while buckets and len(diverse) < max(0, policy.shortlist - len(rejected)):
-        for source in sorted(list(buckets)):
+        for source in sorted(buckets, key=lambda name: (verification_priority(buckets[name][0]), name)):
             if buckets[source]: diverse.append(buckets[source].pop(0))
             if not buckets[source]: del buckets[source]
             if len(diverse) >= policy.shortlist - len(rejected): break
@@ -751,14 +763,20 @@ async def hydrate_result(
             adapter_row["failed"] += 1
         prior_cycles = budget.verification_cycles.get(cycle_key, 0)
         fully_verified = accepted and outcome.state == 'complete'
-        cycles = 0 if fully_verified else prior_cycles + 1
-        budget.verification_cycles[cycle_key] = cycles
+        # Budget/cadence/cooldown deferrals did not inspect this vacancy. Do
+        # not turn missing coverage into a failed verification or pause it for
+        # a week. A real HTTP error (including 429) remains an attempted check.
+        unsent = ((outcome.state == 'deferred' and not is_remote_http_error(outcome.error))
+                  or outcome.error in {'dns_resolution_failed', 'dns_time_budget_exhausted'})
+        cycles = 0 if fully_verified else prior_cycles + (0 if unsent else 1)
+        if cycles or fully_verified:
+            budget.verification_cycles[cycle_key] = cycles
         if fully_verified:
             budget.verification_next_check.pop(cycle_key, None)
             budget.verification_first_failed.pop(cycle_key, None)
-        else:
+        elif not unsent:
             budget.verification_first_failed.setdefault(cycle_key, result.metadata.as_of.timestamp())
-        if not fully_verified and cycles >= max_cycles:
+        if not fully_verified and not unsent and cycles >= max_cycles:
             budget.verification_next_check[cycle_key] = (
                 result.metadata.as_of + timedelta(days=watch_days)
             ).timestamp()
@@ -815,13 +833,25 @@ async def hydrate_result(
     if changed or overlay_added:
         old_metadata = result.metadata
         old_health = list(result.source_health)
+        # Hydration finishes after the initial run clock. A successful live
+        # check must not be rejected as future evidence relative to that start
+        # clock. Once an observation has genuinely been captured, advance the
+        # evaluation cut to this independent completion timestamp. That also
+        # checks deadlines crossed while the remaining requests were finishing.
+        # Never backdate a fetch or let an invalid future cache advance time.
+        completed_at = datetime.now(timezone.utc)
+        captured = any(o.origin == 'hydration' and o.captured_at is not None
+                       and o.identity_state in {'exact', 'corroborated'}
+                       and o.captured_at <= completed_at for o in result.observations)
+        evaluation_as_of = max(old_metadata.as_of, completed_at) if captured else old_metadata.as_of
         rebuilt = evaluate_observations(
             result.observations,
-            as_of=old_metadata.as_of,
+            as_of=evaluation_as_of,
             raw_count=int(result.counts.get("raw") or len([
                 obs for obs in result.observations if obs.origin == "discovery"
             ])),
         )
+        old_metadata.as_of = evaluation_as_of
         result.metadata = old_metadata
         result.observations = rebuilt.observations
         result.evaluated = rebuilt.evaluated

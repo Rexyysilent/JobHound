@@ -66,6 +66,22 @@ _GENERIC_SPECIALIST_PREFIX = re.compile(
     r"(?:\s+(?:ai|llm|model|data|content|training|quality))*)$",
     re.I,
 )
+_PHYSICIAN_OCCUPATION = re.compile(
+    r"^\s*(?:(?:licensed|registered|board[- ]certified|freelance|remote|contract|"
+    r"part[- ]time|full[- ]time)\s+)*(?:physicians?|medical\s+doctors?)\b"
+    r"(?!\s+(?:(?:office|practice|administrative|recruitment|recruiting)\s+)?(?:assistant|support|scheduler|scheduling|"
+    r"recruiter|liaison|relations|coordinator|administrator|receptionist|data\s+entry)\b)",
+    re.I,
+)
+_MEDICAL_CAPABILITIES = {"medical", "medicine", "physician", "clinical_medicine", "medical_doctor"}
+_ATTORNEY_OCCUPATION = re.compile(
+    r"^\s*(?:(?:licensed|qualified|legal\s+research|freelance|remote|contract|"
+    r"part[- ]time|full[- ]time)\s+)*(?:attorneys?|lawyers?)\b"
+    r"(?!\s+(?:(?:office|practice|administrative|recruitment|recruiting)\s+)?(?:assistant|support|scheduler|scheduling|"
+    r"recruiter|liaison|relations|coordinator|administrator|receptionist|data\s+entry)\b)",
+    re.I,
+)
+_LEGAL_CAPABILITIES = {"legal", "law", "attorney", "lawyer"}
 
 _TASK_LANE_MAP = {
     "ai_evaluation": "ai_evaluation",
@@ -150,6 +166,18 @@ def _specialist_domain(
     profile: Profile,
 ) -> tuple[str | None, str]:
     folded = normalize_match(title).casefold()
+    # A named practitioner occupation remains specialized when the task is
+    # labelled "AI evaluation". A medical subject or software for physicians
+    # is not an applicant occupation. This is target-scope evidence only;
+    # any explicit degree/licence requirement is assessed independently.
+    for domain, pattern, capabilities in (
+        ("medical", _PHYSICIAN_OCCUPATION, _MEDICAL_CAPABILITIES),
+        ("legal", _ATTORNEY_OCCUPATION, _LEGAL_CAPABILITIES),
+    ):
+        if pattern.search(folded):
+            claimed = profile.claimed_domains() | {d.casefold() for d in profile.capability_domains}
+            status = "claimed" if claimed & capabilities else "unclaimed"
+            return domain, status
     if not _SPECIALIST_NOUN.search(folded):
         return None, "none"
     # An explicit expert occupation names a narrower capability than the
