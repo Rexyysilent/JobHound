@@ -19,6 +19,7 @@ import httpx
 import errno
 import os
 import hashlib
+import tempfile
 
 
 def _namespace(path: Path | str) -> Path:
@@ -140,6 +141,60 @@ def _write_audit(result, target: Path) -> Path:
     return path
 
 
+def _write_quality_exports(result, target: Path, snapshot: Path) -> dict:
+    """Add bounded, decision-complete review artifacts without changing audit.json."""
+    from ..compact_audit import compact_audit
+    from ..quality import quality_report
+    from ..review_audit import MAX_BYTES, canonical_json
+
+    with snapshot.open('rb') as stream:
+        snapshot_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
+    receipt = {'snapshot_sha256': snapshot_sha256, 'quality_export_status': {}}
+    compact = None
+    for key, name in (('compact_audit', 'audit.compact.json'), ('quality_report', 'quality.json')):
+        path = target / name
+        receipt[key] = receipt[key + '_sha256'] = None
+        status = {}
+        receipt['quality_export_status'][key] = status
+        temporary = None
+        try:
+            if key == 'compact_audit':
+                compact = compact_audit(result, snapshot_reference=str(snapshot.resolve()),
+                                        snapshot_sha256=snapshot_sha256)
+                payload = compact
+            elif compact is None:
+                status['status'] = 'omitted_compact_unavailable'
+                continue
+            else:
+                payload = quality_report(compact)
+            encoded = canonical_json(payload).encode('utf-8')
+            status.update(bytes=len(encoded), limit_bytes=MAX_BYTES)
+            if len(encoded) > MAX_BYTES:
+                status['status'] = 'omitted_size_limit'
+                continue
+            with tempfile.NamedTemporaryFile(dir=target, prefix='.quality-', delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            receipt[key] = name
+            receipt[key + '_sha256'] = hashlib.sha256(encoded).hexdigest()
+            status['status'] = 'written'
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            # Diagnostics have stricter input bounds than the raw snapshot.
+            # Their failure must still leave a usable review and manifest.
+            status.update(status='export_failed', error_type=type(exc).__name__)
+        finally:
+            for stale in (temporary, path if receipt[key] is None else None):
+                if stale is not None:
+                    try:
+                        stale.unlink(missing_ok=True)
+                    except OSError as exc:
+                        status['cleanup_error_type'] = type(exc).__name__
+    return receipt
+
+
 def _checkpoint_raw(raw: list[dict], health: list, target: Path) -> tuple[Path, Path, datetime]:
     """Save replayable sanitized discovery before fallible evaluation."""
     path = target / "raw_discovery.json"
@@ -247,6 +302,7 @@ async def _capture_review(
         directory=target,
     )
     audit_path = _write_audit(result, target)
+    quality_exports = _write_quality_exports(result, target, snapshot)
     hydration_path = target / "hydration_report.json"
     hydration_path.write_text(json.dumps(
         sanitize_payload(hydration_report), ensure_ascii=False, indent=2, sort_keys=True
@@ -262,7 +318,7 @@ async def _capture_review(
         "delivery_called": False,
         "context_fingerprint": current_run().fingerprint(),
         "request_budget": transport.budget.receipt(),
-        "snapshot_sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+        **quality_exports,
     }
     (target / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return snapshot, digest_path
@@ -284,6 +340,7 @@ def replay_review(snapshot: Path | str, output_dir: Path | str) -> tuple[Path, s
     output = target / f"replay_{Path(snapshot).stem}.md"
     output.write_text(digest.text, encoding="utf-8")
     audit_path = _write_audit(result, target)
+    quality_exports = _write_quality_exports(result, target, Path(snapshot))
     fingerprint = decision_fingerprint(result)
     (target / "replay_manifest.json").write_text(json.dumps({
         "mode": "offline_review_replay",
@@ -296,5 +353,6 @@ def replay_review(snapshot: Path | str, output_dir: Path | str) -> tuple[Path, s
         "llm_allowed": False,
         "production_store_called": False,
         "delivery_called": False,
+        **quality_exports,
     }, indent=2, sort_keys=True), encoding="utf-8")
     return output, fingerprint

@@ -94,8 +94,11 @@ def review_files(args):
                 from .v41.review import replay_review
                 replay_review(args.snapshot,target)
     audit=json.loads((target/'audit.json').read_text(encoding='utf-8'))
+    exports={key:str(target/name) for key,name in
+             (('compact_audit','audit.compact.json'),('quality_report','quality.json'))
+             if (target/name).is_file()}
     return dict(schema='jobhound-local-review/v1',profile=local.profile,command=args.local_review_command,
-        output=str(target),accounting_ok=audit['accounting_ok'],network_calls=0,provider_calls=0)
+        output=str(target),accounting_ok=audit['accounting_ok'],network_calls=0,provider_calls=0,**exports)
 
 
 def main(argv=None):

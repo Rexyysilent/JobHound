@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from ..config import CONFIG
 from .models import Assessment, CanonicalJob, EligibilityStatus, SourceKind, Evidence
 from .provenance import public_url
+from .posting_deadlines import DEADLINE_FIELDS, deadline_timestamp, resolve_posting_status
 
 
 def timestamp(value: object) -> datetime | None:
@@ -89,6 +90,13 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
 
     observations = [o for o in canonical.observations if o.job and o.origin != 'account_state']
     matched = [o for o in observations if o.identity_state in {'exact', 'corroborated'}]
+    posting_status = resolve_posting_status([
+        {"observation_id": o.observation_id, "source_kind": o.source_kind.value,
+         "url": public_url(o.normalized_url or o.job.url), "identity_state": o.identity_state,
+         "content_state": o.content_state, "truncated": o.truncated, "captured_at": o.captured_at,
+         "vacancy_state": o.vacancy_state, "raw_payload": o.raw_payload}
+        for o in matched
+    ], now)
     complete = [o for o in matched if o.content_state in {'complete', 'role_complete'} and not o.truncated]
     checks = [timestamp(o.verified_open_at) for o in matched if o.vacancy_state == 'verified_open']
     assessment.verified_open_at = max((x for x in checks if x and x <= now), default=None)
@@ -97,7 +105,7 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     assessment.search_snippet_only = marketplace and not complete
     ttl = CONFIG.v55.marketplace_ttl_hours if marketplace else CONFIG.v55.verification_ttl_hours
     open_fresh = assessment.verified_open_at is not None and (now - assessment.verified_open_at).total_seconds() <= ttl * 3600
-    closed = any(o.vacancy_state == 'explicitly_closed' and o.identity_state in {'exact', 'corroborated'} for o in observations)
+    closed = bool(posting_status.closed_observation_ids)
     thread = None
     if job.source == 'community_thread':
         from .community import observation_thread
@@ -140,12 +148,9 @@ def apply_action_policy(canonical: CanonicalJob, assessment: Assessment, now: da
     evidence_current = bool(observed_at and observed_at <= now and not state_expired and not state.get('evidence_expired'))
 
     # Deadlines are accepted only from captured structured fields, never prose.
-    deadline_values = [state.get('application_deadline'), state.get('deadline')]
-    deadline_values.extend(
-        o.raw_payload.get('application_deadline') or o.raw_payload.get('deadline')
-        for o in matched if isinstance(o.raw_payload, dict)
-    )
-    deadlines = [parsed for value in deadline_values if (parsed := timestamp(value))]
+    deadline_values = [state.get(field) for field in DEADLINE_FIELDS]
+    deadline_values.extend(posting_status.deadline_values)
+    deadlines = [parsed for value in deadline_values if (parsed := deadline_timestamp(value))]
     deadline = min(deadlines, default=None)
     if deadline is not None and deadline <= now:
         assessment.blockers.insert(0, 'source_quality:application_deadline_elapsed')

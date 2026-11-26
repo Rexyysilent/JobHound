@@ -283,6 +283,7 @@ def _candidate(
     *,
     guaranteed: bool = False,
     list_item: bool = False,
+    infer_period: bool = True,
 ) -> PayCandidate | None:
     # Search snippets sometimes render the range dash as either ``.-.`` or
     # ``. -.``.  Repair only the parsing copy; PayCandidate.raw remains the
@@ -319,7 +320,7 @@ def _candidate(
             labor_hourly_supported=hourly,
         )
     unit_claim = parse_compensation_legacy(semantic_raw)
-    lo, hi, basis, estimated = parse_pay(semantic_raw, CONFIG.pay)
+    lo, hi, basis, estimated = parse_pay(semantic_raw, CONFIG.pay, infer_period=infer_period)
     precise_units = CONFIG.v55.enabled
     fixed_amount_usd = None
     if precise_units and unit_claim.basis == "fixed_project" and unit_claim.amount_low is not None:
@@ -813,6 +814,7 @@ def extract_pay_candidates(canonical: CanonicalJob) -> tuple[list[PayCandidate],
                 job.pay_raw, source_field, observation.observation_id, confidence,
                 observation.source_kind,
                 guaranteed=job.guaranteed_hours,
+                infer_period=job.source != "lever",
             )
             if item is not None:
                 if CONFIG.v55.enabled:

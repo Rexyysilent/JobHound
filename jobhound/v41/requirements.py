@@ -146,7 +146,7 @@ _LOCATION_ALIASES = {
     "israel": ("israel", "tel aviv", "jerusalem"),
     "norway": ("norway", "oslo"),
     "peru": ("peru", "lima"),
-    "germany": ("germany", "berlin", "munich", "hamburg"),
+    "germany": ("germany", "deutschland", "berlin", "munich", "hamburg"),
     "united_states": ("united states", "usa", "u.s.", "us", "new york", "san francisco"),
     "united_kingdom": ("united kingdom", "london", "england", "scotland", "wales"),
     "canada": ("canada", "toronto", "vancouver"),

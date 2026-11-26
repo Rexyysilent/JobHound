@@ -19,14 +19,14 @@ def test_eligible_counts_cards_only_not_recorded_status_items():
     # Finding 1: 10 new cards plus 6 already-recorded status items is 10 eligible.
     text = render_job_summary(ledger(status_already=6), carded_here=10,
                               card_states={"pending": 10})
-    assert "10 eligible" in text and "16 eligible" not in text
+    assert "10 matched" in text and "16 matched" not in text
 
 
 def test_held_status_items_never_make_the_card_count_negative():
     # Finding 2: holds are counted from this run's card intents only.
     text = render_job_summary(ledger(eligible=2, selected=2), carded_here=2,
                               card_states={"pending": 2})
-    assert "2 newly queued" in text and "-" not in text.split("Jobs this run")[1].split(";")[1]
+    assert "2 newly queued" in text and "-" not in text.split("Candidates this run")[1].split(";")[1]
 
 
 def test_adopted_legacy_cards_are_reported_as_suppressed_not_held():
@@ -55,8 +55,8 @@ def test_reports_without_card_accounting_make_no_run_claims():
            "states": {"legacy_hold": 1}}
     text = render_job_summary(old, carded_here=2, card_states={})
     assert "This email carries 2 job cards" in text
-    assert "Jobs this run" not in text and "held for" not in text
-    assert "74 more eligible jobs are in the local run audit" in text
+    assert "Candidates this run" not in text and "held for" not in text
+    assert "74 more matched candidates are in the local run audit" in text
 
 
 def test_overflow_line_marks_unsafe_urls_and_uppercases_any_band():
@@ -85,9 +85,49 @@ def test_staged_ledger_accounts_cards_and_renders_from_current_states(store):
     ids = [r["id"] for r in store.delivery.inspect() if r["status"] == "pending"]
     body = transport.inspect(transport.prepare(EMAIL, ids, now=101,
                                                summary_run_id=value.metadata.run_id))["body"]
-    assert ("Jobs this run: 12 eligible; 4 newly queued, 1 suppressed as already sent "
+    assert ("Candidates this run: 12 matched; 4 newly queued, 1 suppressed as already sent "
             "before V6, 7 listed below, 0 already queued or sent in an earlier run.") in body
     assert "This email carries 4 job cards" in body
+
+
+def test_digest_fingerprints_use_staged_run_and_keep_frozen_body(store):
+    from jobhound.delivery_transport import DigestTransport
+
+    value = _many_eligible()
+    original_code = value.metadata.runtime_versions["code_sha256"]
+    original_config = value.metadata.config_hash
+    stage(store, value)
+    # Rendering later must describe the saved run, not a changed live object.
+    value.metadata.runtime_versions["code_sha256"] = "d" * 64
+    value.metadata.config_hash = "e" * 64
+    transport = DigestTransport(store.delivery)
+    ids = [row["id"] for row in store.delivery.inspect()]
+    envelope = transport.prepare(EMAIL, ids, now=101, summary_run_id=value.metadata.run_id)
+    saved = transport.inspect(envelope)
+    assert (f"Run fingerprints (SHA-256 prefixes): code {original_code[:12]}; "
+            f"config {original_config[:12]}.") in saved["body"]
+    row = store.conn.execute("SELECT report FROM delivery_runs").fetchone()
+    report = json.loads(row[0])
+    report["provenance"]["code_sha256"] = "f" * 64
+    store.conn.execute("UPDATE delivery_runs SET report=?", (json.dumps(report),))
+    assert transport.inspect(envelope)["body"] == saved["body"]
+    assert transport.inspect(envelope)["body_hash"] == saved["body_hash"]
+
+
+def test_legacy_report_does_not_invent_run_fingerprints(store):
+    from jobhound.delivery_transport import DigestTransport
+
+    value = _many_eligible()
+    stage(store, value)
+    report = json.loads(store.conn.execute("SELECT report FROM delivery_runs").fetchone()[0])
+    report.pop("provenance")
+    store.conn.execute("UPDATE delivery_runs SET report=?", (json.dumps(report),))
+    transport = DigestTransport(store.delivery)
+    ids = [row["id"] for row in store.delivery.inspect()]
+    body = transport.inspect(transport.prepare(EMAIL, ids, now=101,
+                                               summary_run_id=value.metadata.run_id))["body"]
+    assert "Run fingerprints" not in body
+    assert "Candidates this run" in body
 
 
 def test_overflow_order_is_the_digest_order_and_entries_are_built_once(store, monkeypatch):

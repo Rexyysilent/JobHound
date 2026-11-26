@@ -118,7 +118,7 @@ def _extract_amounts(s: str) -> list[float]:
     return out
 
 
-def parse_pay(pay_raw: str | None, cfg: PayCfg) -> tuple[float | None, float | None, str, bool]:
+def parse_pay(pay_raw: str | None, cfg: PayCfg, *, infer_period: bool = True) -> tuple[float | None, float | None, str, bool]:
     """Return (min_hourly_usd, max_hourly_usd, basis, is_estimate).
 
     basis "unknown" with None hourly means: pay not determinable → down-rank.
@@ -139,6 +139,8 @@ def parse_pay(pay_raw: str | None, cfg: PayCfg) -> tuple[float | None, float | N
 
     # Infer basis from magnitude only when no explicit period was stated.
     if basis == "unknown":
+        if not infer_period or re.search(r"\bone[- ]time\b|(?:\bper\s+|/\s*)(?:day|week)\b|\b(?:daily|weekly)\b", s, re.I):
+            return None, None, "unknown", False
         if hi_usd >= 2000:
             basis = "year"
         elif hi_usd <= 200:
@@ -173,7 +175,7 @@ def enrich_pay(job: Job, cfg: PayCfg = CONFIG.pay) -> Job:
     v3.5: records pay_source provenance and falls back to an explicit hourly
     expression in the title when the structured field is absent or unparseable.
     """
-    lo, hi, basis, est = parse_pay(job.pay_raw, cfg)
+    lo, hi, basis, est = parse_pay(job.pay_raw, cfg, infer_period=job.source != "lever")
     if lo is not None or hi is not None:
         # Structured/provider pay stays the first choice.
         job.pay_source = "email" if job.source.startswith("email:") else "structured"

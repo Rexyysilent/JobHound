@@ -1,5 +1,29 @@
 # Current implementation changes
 
+## November 25, 2026: job-search accuracy and run diagnostics
+
+- Read exact EU Greenhouse postings through the native API and reconcile only
+  internally inferred board-name hints with the same verified posting.
+- Evaluate accepted live hydration at retrieval completion; preserve original
+  observation times across deterministic replay and reject future cache evidence.
+- Prioritize exact native leaves within existing verification budgets. Unsent
+  budget/cadence/cooldown deferrals do not exhaust a vacancy's retry allowance.
+- Preserve Ashby remote/hybrid and direct-link-only semantics, Lever's complete
+  requirement/salary/location fields, and Greenhouse's original publication date.
+- Keep applicant residence separate from remote work. Interpret structured
+  deadlines consistently, including publisher extensions and explicit closures.
+- Exclude counted job directories, personal social posts, foreign onsite roles
+  and out-of-scope practitioner/management occupations while retaining valid
+  recruitment, administrative support and remote alternatives.
+- Add full-cohort saved-run quality diagnostics and compact review exports with
+  exact snapshot/file hashes and explicit size-limit fallback. Diagnose missing
+  facts and collection coverage without claiming externally measured accuracy.
+- Label digest totals as matched candidates and include saved run fingerprints
+  in newly staged durable delivery summaries.
+
+See [job-search accuracy](job_search_accuracy.md) and
+[run-quality diagnostics](run_quality.md) for behavior, usage and limits.
+
 ## October 23, 2026: preserve distinct posting identities
 
 - Replace fuzzy cross-posting collapse in V3 and default V4.2 with explicit

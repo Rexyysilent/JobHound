@@ -733,7 +733,12 @@ def stage_delivery_run(outbox, result, destinations, *, now, card_cap, status_ca
                         'overflow':[entries[item.canonical.canonical_id] for item in overflow]})
     stage_coverage_updates(outbox, result, targets, ledgers, policy, as_of,
                            now=now, status_cap=status_cap)
-    return {'run_id':result.metadata.run_id,'destinations':ledgers,'revisions':revisions}
+    return {'run_id':result.metadata.run_id,'destinations':ledgers,'revisions':revisions,
+            'provenance':{
+                'code_sha256':result.metadata.runtime_versions.get('code_sha256'),
+                'dependencies_sha256':result.metadata.runtime_versions.get('dependencies_sha256'),
+                'config_hash':result.metadata.config_hash,
+            }}
 
 
 def stage_coverage_updates(outbox, result, targets, ledgers, policy, as_of, *, now, status_cap):

@@ -10,9 +10,9 @@ from ..config import CONFIG
 from ..dedupe import dedupe
 from ..normalize import normalize
 from ..pipeline import account_ledger, evaluate_jobs, finalize_verdicts
-from .engine import decision_fingerprint, evaluate_observations, evaluate_raw
+from .engine import decision_fingerprint, evaluate_observations, initialize_captured_observation
 from .models import ActionBand, ListingObservation, RunResult
-from .provenance import public_url, sanitize_payload
+from .provenance import build_observations, public_url, sanitize_payload
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -75,6 +75,16 @@ def write_snapshot(
     }
     if result.metadata.engine_version == "v5.0.0-rc1":
         header["release_policy"] = release_policy_payload()
+        # Evaluation may advance to the end of live hydration. Keep earlier
+        # discovery check times instead of stamping them with that later cut
+        # when replay reconstructs native observations from their raw fields.
+        header["discovery_observation_times"] = {
+            observation.observation_id: {
+                "captured_at": observation.captured_at.isoformat() if observation.captured_at else None,
+                "verified_open_at": observation.verified_open_at.isoformat() if observation.verified_open_at else None,
+            }
+            for observation in result.observations if observation.origin == "discovery"
+        }
         header["account_state_observations"] = [
             sanitize_payload(observation.model_dump(mode="json"))
             for observation in result.observations
@@ -170,16 +180,31 @@ def replay(path: Path | str) -> RunResult:
                                  workspace=prior.workspace if prior else '.',
                                  run_id=prior.run_id if prior else None)
     with run_scope(context):
-        seed = evaluate_raw(raw, as_of=as_of)
-        observations = list(seed.observations)
+        observations, _ = build_observations(raw)
+        if config.v55.enabled:
+            from .action_policy import timestamp
+            saved_times = header.get("discovery_observation_times")
+            for observation in observations:
+                times = saved_times.get(observation.observation_id) if isinstance(saved_times, dict) else None
+                times = times if isinstance(times, dict) else {}
+                captured = timestamp(times.get("captured_at"))
+                # Discovery may be open at capture even when its deadline has
+                # elapsed by the final evaluation. Reconstruct both stages.
+                capture_time = captured if captured is not None and captured <= as_of else as_of
+                initialize_captured_observation(observation, capture_time)
+                if "captured_at" in times and times["captured_at"] is None:
+                    observation.captured_at = None
+                if "verified_open_at" in times:
+                    verified = timestamp(times["verified_open_at"])
+                    if times["verified_open_at"] is None or (verified and verified <= as_of):
+                        observation.verified_open_at = verified
         for encoded in [*(header.get("hydration_observations") or []),
                         *(header.get("account_state_observations") or [])]:
             try:
                 observations.append(ListingObservation.model_validate(encoded))
             except (TypeError, ValueError):
                 continue
-        result = (evaluate_observations(observations, as_of=as_of, raw_count=len(raw))
-                  if len(observations) != len(seed.observations) else seed)
+        result = evaluate_observations(observations, as_of=as_of, raw_count=len(raw))
     result.source_health = list(
         header.get("source_health") or []
     )

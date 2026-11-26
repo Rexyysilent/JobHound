@@ -64,6 +64,19 @@ _DISCUSSION_BODY = re.compile(
 )
 _MODERATION = re.compile(r"\bmoderat(?:e|es|ed|ing|ion|or|ors)\b", re.I)
 _POOL = re.compile(r"\b(?:talent\s+(?:network|community|pool)|join\s+our\s+network|future\s+opportunities|waitlist|expression\s+of\s+interest)\b", re.I)
+_SOCIAL_HOSTS = {"facebook.com", "instagram.com", "twitter.com", "x.com"}
+_SOCIAL_NEEDED = re.compile(
+    r"(?<!no )\b(?:speakers?|evaluators?|raters?|annotators?|transcribers?|"
+    r"contributors?|freelancers?|contractors?|developers?|specialists?)\s+"
+    r"(?:are\s+)?(?:needed|wanted|sought)\b", re.I,
+)
+_JOB_SEEKER = re.compile(
+    r"\b(?:i\s+(?:am|'m)|i'm)\s+(?:looking\s+for|seeking)\s+"
+    r"(?:(?:a|an|remote|freelance|new|part[- ]time|full[- ]time)\s+){0,4}(?:job|work|employment)\b|"
+    r"\b(?:i\s+am|i'm|i\s+am\s+currently|i'm\s+currently)\s+"
+    r"(?:open\s+to\s+work|available\s+for\s+hire)\b",
+    re.I,
+)
 
 
 def classify_document(title: str, text: str, url: str = "") -> DocumentClassification:
@@ -77,7 +90,11 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
     # A document classification is not proof of a live vacancy or eligibility.
     if not title.strip() and not text.strip():
         return DocumentClassification("unknown", "unknown", "unknown", False, ("empty_document",))
-    from ..filters.listing_quality import resource_page_check
+    from ..filters.listing_quality import counted_job_index_check, resource_page_check
+    index_reasons = counted_job_index_check(title)
+    if index_reasons:
+        return DocumentClassification("job_index", "index", "employer", False,
+                                      tuple(index_reasons))
     content_reasons = resource_page_check(title, url)
     if content_reasons:
         return DocumentClassification('article', 'non_opportunity', 'content', False,
@@ -132,6 +149,32 @@ def classify_document(title: str, text: str, url: str = "") -> DocumentClassific
         if _RECRUITMENT.search(combined):
             return DocumentClassification("individual_job", "individual_role", "employer", True, ("explicit_recruitment_demand",))
         return DocumentClassification("discussion", "non_opportunity", "discussion", False, ("discussion_route",))
+    # Personal posts and job-seeker biographies are discovery noise, not
+    # vacancies. Preserve explicit buyer/recruiter demand on the same hosts;
+    # the normal evidence policy must still verify it before recommending Apply.
+    if any(host == social or host.endswith("." + social) for social in _SOCIAL_HOSTS):
+        # Quoted examples describe another speaker, not the post author's
+        # employment status or hiring demand. Source text stays unchanged.
+        social_primary = re.sub(r'"[^"\n]*"|“[^”\n]*”', " ", primary)
+        if _SELLER.search(social_primary) or _JOB_SEEKER.search(social_primary):
+            return DocumentClassification("seller_service", "non_opportunity", "seller", False,
+                                          ("social_seller_or_job_seeker",))
+        if _POOL.search(social_primary):
+            return DocumentClassification("talent_pool", "pool", "employer", False,
+                                          ("unallocated_pool",))
+        if _BUYER.search(social_primary):
+            return DocumentClassification("buyer_request", "individual_request", "buyer", True,
+                                          ("explicit_social_buyer_demand",))
+        if _RECRUITMENT.search(social_primary) or _SOCIAL_NEEDED.search(social_primary):
+            return DocumentClassification("individual_job", "individual_role", "employer", True,
+                                          ("explicit_social_recruitment",))
+        if (re.search(r"\b(?:requirements?|qualifications?|responsibilities|duties)\s*:", social_primary, re.I)
+                and re.search(r"\bapply(?:\s*:|\s+(?:now|here|today|through|via|for\s+(?:this|the)\s+role)\b)",
+                              social_primary, re.I)):
+            return DocumentClassification("individual_job", "individual_role", "employer", True,
+                                          ("structured_social_role_and_application",))
+        return DocumentClassification("discussion", "non_opportunity", "discussion", False,
+                                      ("social_post_without_hiring_demand",))
     if _SELLER.search(combined):
         return DocumentClassification("seller_service", "non_opportunity", "seller", False, ("seller_language",))
     if _POOL.search(primary):

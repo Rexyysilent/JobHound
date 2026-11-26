@@ -186,7 +186,7 @@ def is_card_payload(payload):
 
 
 def render_job_summary(ledger, *, carded_here, card_states):
-    """Email job accounting plus the eligible cards the digest caps left out.
+    """Email candidate accounting plus the matches the digest caps left out.
 
     `carded_here` counts the cards actually in this email, which can include
     cards left pending by an earlier run. `card_states` are the current
@@ -211,16 +211,16 @@ def render_job_summary(ledger, *, carded_here, card_states):
             parts.append(f"{held} held for legacy review")
         parts += [f"{listed} listed below",
                   f"{cards['already_recorded']} already queued or sent in an earlier run"]
-        lines.insert(0, f"\nJobs this run: {cards['eligible']} eligible; {', '.join(parts)}.")
+        lines.insert(0, f"\nCandidates this run: {cards['eligible']} matched; {', '.join(parts)}.")
         lines[1] = lines[1].lstrip('\n')
     # Reports staged before card accounting existed make no run-level claims.
     if overflow is None:
         if listed:
-            lines.append(f"{listed} more eligible jobs are in the local run audit.")
+            lines.append(f"{listed} more matched candidates are in the local run audit.")
         return '\n'.join(lines) + '\n'
     if not overflow:
         return '\n'.join(lines) + '\n'
-    lines += ['', 'Also eligible (not carded)', '']
+    lines += ['', 'Other matches (not full cards)', '']
     per_employer, hidden, shown = {}, {}, 0
     for entry in overflow:
         employer = entry.get('company') or entry.get('host') or 'unknown employer'
@@ -239,7 +239,7 @@ def render_job_summary(ledger, *, carded_here, card_states):
     others = sum(n for e, n in hidden.items() if e not in per_employer)
     unlisted = listed - len(overflow)
     if others or unlisted:
-        lines.append(f"+ {others + unlisted} more eligible jobs in the local run audit")
+        lines.append(f"+ {others + unlisted} more matched candidates in the local run audit")
     return '\n'.join(lines) + '\n'
 
 
@@ -342,7 +342,8 @@ class DigestTransport:
                     (self.box.workspace,self.box.profile,summary_run_id)).fetchone()
                 if record is None:
                     raise ValueError('coverage summary requires a staged run in this namespace')
-                ledger = next((d for d in json.loads(record[0])['destinations']
+                report = json.loads(record[0])
+                ledger = next((d for d in report['destinations']
                                if d['channel']==destination.channel and d['destination']==destination.key), None)
                 if ledger is None:
                     raise ValueError('coverage summary destination mismatch')
@@ -365,6 +366,19 @@ class DigestTransport:
                          f"{coverage['overflow']} deferred by the status cap, "
                          f"{coverage['policy_review']} held for policy review.\n"
                          "Deferred/held source updates are not individually delivered here; full details remain in the local run audit.\n")
+                provenance = report.get('provenance')
+                if isinstance(provenance, dict):
+                    hashes = []
+                    for key, label in (('code_sha256', 'code'), ('config_hash', 'config')):
+                        value = provenance.get(key)
+                        # Existing run config hashes are 16-character SHA-256
+                        # prefixes; the runtime code hash contains all 64.
+                        lengths = (16, 64) if key == 'config_hash' else (64,)
+                        if (isinstance(value, str) and len(value) in lengths
+                                and all(c in '0123456789abcdef' for c in value)):
+                            hashes.append(f"{label} {value[:12]}")
+                    if hashes:
+                        body += "Run fingerprints (SHA-256 prefixes): " + "; ".join(hashes) + ".\n"
             if len(body.encode()) > 128 * 1024:
                 raise ValueError('digest exceeds 128 KiB; select fewer intents')
             if destination.channel == 'telegram':
