@@ -113,13 +113,18 @@ def resolve_posting_status(records: Iterable[Mapping], as_of: datetime) -> Posti
         if record.get("vacancy_state") != "explicitly_closed":
             continue
         raw = payload(record)
-        # A board's expired listing or closure notice applies to that copy.
-        if original_open and record.get("source_kind") not in original_kinds:
-            if has_elapsed_deadline(raw, now):
+        # A board's closed listing applies to that copy. An unclassified
+        # site's explicit notice can still come from the posting itself.
+        kind = record.get("source_kind")
+        deadline_elapsed = has_elapsed_deadline(raw, now)
+        deadline_only = deadline_elapsed and not raw.get("_closure_evidence")
+        known_copy = kind in {"reputable_board", "aggregator_unresolved", "content_farm"}
+        if original_open and kind not in original_kinds and (known_copy or deadline_only):
+            if deadline_elapsed:
                 superseded.append(str(record.get("observation_id") or ""))
             continue
         old_time = _captured_at(record.get("captured_at"))
-        replaced = (not raw.get("_closure_evidence") and has_elapsed_deadline(raw, now)
+        replaced = (deadline_only
                     and old_time is not None and any(
                         key(newer) == key(record) and newer.get("source_kind") in original_kinds
                         and newer.get("vacancy_state") == "verified_open"
