@@ -317,6 +317,8 @@ def test_full_compact_and_review_export_keep_same_cohort_and_exact_snapshot(tmp_
 @pytest.mark.parametrize("scenario,application_ready,opening", [
     ("renewed_deadline_closure", True, "verified_open_recorded"),
     ("renewed_old_open", True, "verified_open_recorded"),
+    ("removed_deadline_after_closure", True, "verified_open_recorded"),
+    ("removed_deadline_after_open", True, "verified_open_recorded"),
     ("explicit_closure_notice", False, "explicitly_closed"),
     ("copy_cannot_extend_original", False, "deadline_elapsed"),
     ("current_original_beats_old_copy", True, "verified_open_recorded"),
@@ -336,6 +338,13 @@ def test_quality_and_engine_share_current_posting_status_in_full_and_compact(
     monkeypatch.setattr(CONFIG.v55, "enabled", True)
     old = dated_posting("old", run_clock - timedelta(days=2), "2026-11-24")
     new = dated_posting("new", run_clock, "2026-12-10")
+    if scenario in {"removed_deadline_after_closure", "removed_deadline_after_open"}:
+        old.source_kind = new.source_kind = SourceKind.ORIGINAL_EMPLOYER
+        del new.raw_payload["validThrough"]
+        if scenario == "removed_deadline_after_closure":
+            old.captured_at = run_clock - timedelta(hours=1)
+            old.vacancy_state = "explicitly_closed"
+            old.verified_open_at = None
     if scenario in {"renewed_deadline_closure", "explicit_closure_notice"}:
         old.vacancy_state = "explicitly_closed"
     if scenario == "explicit_closure_notice":

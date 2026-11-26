@@ -14,7 +14,7 @@ from jobhound.v41 import hydration, resolve
 from jobhound.v41.engine import decision_fingerprint, evaluate_observations, evaluate_raw
 from jobhound.v41.hydration import HydrationResult, RetrievalBudget, RetrievalPolicy
 from jobhound.v41.models import ListingObservation, SourceKind
-from jobhound.v41.posting_deadlines import deadline_timestamp, has_elapsed_deadline
+from jobhound.v41.posting_deadlines import deadline_timestamp, has_elapsed_deadline, resolve_posting_status
 from jobhound.v41.replay import replay, write_snapshot
 
 
@@ -367,6 +367,34 @@ def test_newer_copy_cannot_extend_original_deadline():
     copy = dated_posting("new-copy", NOW, "2026-12-10", kind=SourceKind.REPUTABLE_BOARD)
     result = evaluate_observations([old, copy], as_of=NOW, raw_count=2)
     assert result.evaluated[0].assessment.lifecycle == "closed"
+
+
+@pytest.mark.parametrize("change,cleared", [
+    ({}, True),
+    ({"source_kind": "original_ats", "raw_payload": {"validThrough": None}}, True),
+    ({"url": "https://jobs.example.org/other"}, False),
+    ({"captured_at": NOW - timedelta(days=1)}, False),  # tied with the closure
+    ({"captured_at": None}, False),
+    ({"captured_at": NOW + timedelta(seconds=1)}, False),
+    ({"content_state": "partial"}, False),
+    ({"truncated": True}, False),
+    ({"source_kind": "reputable_board"}, False),
+    ({"vacancy_state": "unknown"}, False),
+    ({"raw_payload": {"validThrough": "unparseable"}}, False),
+    ({"raw_payload": None}, False),
+])
+def test_deadline_removal_requires_a_later_verified_original(change, cleared):
+    old = dict(observation_id="old", source_kind="original_employer", url="https://jobs.example.org/123",
+               identity_state="exact", content_state="complete", truncated=False, captured_at=NOW - timedelta(days=1),
+               vacancy_state="explicitly_closed", raw_payload={"deadline": "2026-11-20"})
+    new = dict(old, observation_id="new", captured_at=NOW, vacancy_state="verified_open", raw_payload={})
+    new.update(change)
+    for records in ([old, new], [new, old]):
+        status = resolve_posting_status(records, NOW)
+        assert status.closed_observation_ids == (() if cleared else ("old",))
+        assert status.superseded_deadline_closure_ids == (("old",) if cleared else ())
+        assert status.deadline_values == (() if cleared else ("2026-11-20",))
+        assert status.deadline_observation_ids == (() if cleared else ("old",))
 
 
 def test_old_copy_deadline_does_not_close_current_original():

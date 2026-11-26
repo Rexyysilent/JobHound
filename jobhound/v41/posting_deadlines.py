@@ -72,8 +72,8 @@ def resolve_posting_status(records: Iterable[Mapping], as_of: datetime) -> Posti
     raw_payload containing only deadline fields and optional _closure_evidence.
     This same pure function serves live decisions and saved-audit checks.
 
-    A later complete original can replace an earlier deadline for the same
-    posting. Copies cannot overrule originals. Tied/undated captures preserve
+    A later complete original can revise a deadline, including by removing
+    it from a verified-open posting. Tied/undated captures preserve
     uncertainty. A scoped closure notice never becomes a deadline revision.
     """
     now = _captured_at(as_of)
@@ -86,7 +86,9 @@ def resolve_posting_status(records: Iterable[Mapping], as_of: datetime) -> Posti
         return value if isinstance(value, Mapping) else {}
 
     def key(record):
-        return record.get("source_kind"), str(record.get("url") or "").rstrip("/")
+        kind = record.get("source_kind")
+        url = str(record.get("url") or "").rstrip("/")
+        return ("original" if url and kind in original_kinds else kind), url
 
     observed = [record for record in records if isinstance(record, Mapping)
                 and record.get("identity_state") in {"exact", "corroborated"}
@@ -96,14 +98,26 @@ def resolve_posting_status(records: Iterable[Mapping], as_of: datetime) -> Posti
                  and not record.get("truncated")]
     groups = {}
     for record in originals or observed:
-        if not any(deadline_timestamp(payload(record).get(field)) is not None for field in DEADLINE_FIELDS):
+        raw = record.get("raw_payload")
+        if not isinstance(raw, Mapping):
             continue
-        groups.setdefault(key(record), []).append(record)
+        fields = [raw.get(field) for field in DEADLINE_FIELDS]
+        deadlines = tuple(value for value in fields if deadline_timestamp(value) is not None)
+        if not deadlines:
+            # Only a complete, verified-open original can establish removal.
+            # An unreadable deadline or an unverified copy is inconclusive.
+            removed = (bool(originals) and bool(record.get("url"))
+                       and record.get("vacancy_state") == "verified_open"
+                       and _captured_at(record.get("captured_at")) is not None
+                       and all(value is None or (isinstance(value, str) and not value.strip()) for value in fields))
+            if not removed:
+                continue
+        groups.setdefault(key(record), []).append((record, deadlines))
     current = []
     for group in groups.values():
-        latest = max((captured for record in group
+        latest = max((captured for record, _ in group
                       if (captured := _captured_at(record.get("captured_at"))) is not None), default=None)
-        current.extend(record for record in group
+        current.extend((record, deadlines) for record, deadlines in group
                        if _captured_at(record.get("captured_at")) in {None, latest})
 
     original_open = any(record.get("vacancy_state") == "verified_open"
@@ -131,12 +145,12 @@ def resolve_posting_status(records: Iterable[Mapping], as_of: datetime) -> Posti
                         and (new_time := _captured_at(newer.get("captured_at"))) is not None
                         and old_time < new_time <= now
                         and not has_elapsed_deadline(payload(newer), now)
-                        for newer in current))
+                        for newer, _ in current))
         (superseded if replaced else closed).append(str(record.get("observation_id") or ""))
     return PostingStatus(
-        deadline_values=tuple(payload(record).get(field) for record in current for field in DEADLINE_FIELDS
-                              if deadline_timestamp(payload(record).get(field)) is not None),
-        deadline_observation_ids=tuple(str(record.get("observation_id") or "") for record in current),
+        deadline_values=tuple(value for _, deadlines in current for value in deadlines),
+        deadline_observation_ids=tuple(str(record.get("observation_id") or "")
+                                       for record, deadlines in current if deadlines),
         closed_observation_ids=tuple(closed),
         superseded_deadline_closure_ids=tuple(superseded),
     )

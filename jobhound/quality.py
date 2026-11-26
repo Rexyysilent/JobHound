@@ -133,7 +133,6 @@ def _support(observations: list[dict], complete: bool, as_of: datetime | None) -
             raw = observation.get("raw_payload")
             if raw is not None and not isinstance(raw, dict):
                 raise AuditError("observation raw_payload must be an object or null")
-            raw = raw or {}
             job = observation.get("job")
             url = (observation.get("normalized_url") or observation.get("url")
                    or (job.get("url") if isinstance(job, dict) else None))
@@ -146,7 +145,8 @@ def _support(observations: list[dict], complete: bool, as_of: datetime | None) -
                     "observation_id", "source_kind", "identity_state", "content_state",
                     "truncated", "captured_at", "vacancy_state")},
                 "url": url,
-                "raw_payload": {key: raw.get(key) for key in (*DEADLINE_FIELDS, "_closure_evidence")},
+                "raw_payload": ({key: raw.get(key) for key in (*DEADLINE_FIELDS, "_closure_evidence")}
+                                if raw is not None else None),
             })
     unavailable = "unverified" if fields_complete else "not_recorded"
     content = any(o.get("content_state") in {"complete", "role_complete"}
