@@ -149,41 +149,49 @@ def _write_quality_exports(result, target: Path, snapshot: Path) -> dict:
 
     with snapshot.open('rb') as stream:
         snapshot_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
-    compact = compact_audit(result, snapshot_reference=str(snapshot.resolve()),
-                            snapshot_sha256=snapshot_sha256)
-    quality = quality_report(compact)
-    exports = {'compact_audit': ('audit.compact.json', compact),
-               'quality_report': ('quality.json', quality)}
-    encoded = {key: canonical_json(payload).encode('utf-8')
-               for key, (_, payload) in exports.items()}
     receipt = {'snapshot_sha256': snapshot_sha256, 'quality_export_status': {}}
-    for key, (name, _) in exports.items():
-        receipt['quality_export_status'][key] = {
-            'status': 'written' if len(encoded[key]) <= MAX_BYTES else 'omitted_size_limit',
-            'bytes': len(encoded[key]), 'limit_bytes': MAX_BYTES,
-        }
-        if len(encoded[key]) > MAX_BYTES:
-            # Do not fail a completed capture or present an older compact file
-            # as this run's output when the review namespace is reused.
-            (target / name).unlink(missing_ok=True)
-            receipt[key] = None
-            receipt[key + '_sha256'] = None
-            continue
-        # Replacement preserves reusable review directories; exclusive public
-        # compact exports retain their existing no-overwrite API contract.
+    compact = None
+    for key, name in (('compact_audit', 'audit.compact.json'), ('quality_report', 'quality.json')):
+        path = target / name
+        receipt[key] = receipt[key + '_sha256'] = None
+        status = {}
+        receipt['quality_export_status'][key] = status
         temporary = None
         try:
+            if key == 'compact_audit':
+                compact = compact_audit(result, snapshot_reference=str(snapshot.resolve()),
+                                        snapshot_sha256=snapshot_sha256)
+                payload = compact
+            elif compact is None:
+                status['status'] = 'omitted_compact_unavailable'
+                continue
+            else:
+                payload = quality_report(compact)
+            encoded = canonical_json(payload).encode('utf-8')
+            status.update(bytes=len(encoded), limit_bytes=MAX_BYTES)
+            if len(encoded) > MAX_BYTES:
+                status['status'] = 'omitted_size_limit'
+                continue
             with tempfile.NamedTemporaryFile(dir=target, prefix='.quality-', delete=False) as stream:
                 temporary = Path(stream.name)
-                stream.write(encoded[key])
+                stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, target / name)
+            os.replace(temporary, path)
+            receipt[key] = name
+            receipt[key + '_sha256'] = hashlib.sha256(encoded).hexdigest()
+            status['status'] = 'written'
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            # Diagnostics have stricter input bounds than the raw snapshot.
+            # Their failure must still leave a usable review and manifest.
+            status.update(status='export_failed', error_type=type(exc).__name__)
         finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
-        receipt[key] = name
-        receipt[key + '_sha256'] = hashlib.sha256(encoded[key]).hexdigest()
+            for stale in (temporary, path if receipt[key] is None else None):
+                if stale is not None:
+                    try:
+                        stale.unlink(missing_ok=True)
+                    except OSError as exc:
+                        status['cleanup_error_type'] = type(exc).__name__
     return receipt
 
 

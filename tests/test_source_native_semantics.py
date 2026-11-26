@@ -291,6 +291,25 @@ def test_lever_salary_description_survives_missing_structured_currency():
     assert record["raw"]["salaryRange"]["min"] == 20
 
 
+@pytest.mark.parametrize("release_enabled", [True, False])
+@pytest.mark.parametrize("interval", ["one-time", "per-day-wage", "per-week-wage", "biweekly", None, "per-hour-wage"])
+def test_lever_pay_floor_requires_a_convertible_period(monkeypatch, release_enabled, interval):
+    from jobhound.enrich.pay import enrich_pay
+    from jobhound.enrich.pay_gate import apply_pay_gate
+
+    monkeypatch.setattr(CONFIG.v55, "enabled", release_enabled)
+    record = lever(descriptionPlain=ROLE.partition("Compensation")[0],
+                   salaryRange={"min": 150, "currency": "USD", "interval": interval})
+    legacy = enrich_pay(normalize(record))
+    apply_pay_gate(legacy, {}, CONFIG.pay)
+    _, item = result(record)
+    expected = 150 if interval == "per-hour-wage" else None
+    assert legacy.pay_max_hourly_usd == item.job.pay_max_hourly_usd == expected
+    assert legacy.pay_ok is item.job.pay_ok is (True if expected else None)
+    if interval == "one-time":
+        assert "one-time" in normalize(record).pay_raw
+
+
 @pytest.mark.parametrize("published,expected", [
     ("2026-10-01T08:00:00Z", datetime(2026, 10, 1, 8, tzinfo=timezone.utc)),
     (None, None),

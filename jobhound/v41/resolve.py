@@ -765,9 +765,8 @@ async def hydrate_result(
         fully_verified = accepted and outcome.state == 'complete'
         # Budget/cadence/cooldown deferrals did not inspect this vacancy. Do
         # not turn missing coverage into a failed verification or pause it for
-        # a week. A real HTTP error (including 429) remains an attempted check.
-        unsent = ((outcome.state == 'deferred' and not is_remote_http_error(outcome.error))
-                  or outcome.error in {'dns_resolution_failed', 'dns_time_budget_exhausted'})
+        # a week. A failed DNS lookup or HTTP response counts as an attempt.
+        unsent = outcome.state == 'deferred' and not is_remote_http_error(outcome.error)
         cycles = 0 if fully_verified else prior_cycles + (0 if unsent else 1)
         if cycles or fully_verified:
             budget.verification_cycles[cycle_key] = cycles

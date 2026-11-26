@@ -494,7 +494,10 @@ def _print_quality_exports(output_dir, manifest_name: str) -> None:
             print(f"{label}: {target / manifest[key]}")
         elif key in manifest.get("quality_export_status", {}):
             status = manifest["quality_export_status"][key]
-            print(f"{label}: {status['status']} ({status['bytes']} bytes; limit {status['limit_bytes']})")
+            detail = status.get("error_type")
+            if status["status"] == "omitted_size_limit":
+                detail = f"{status['bytes']} bytes; limit {status['limit_bytes']}"
+            print(f"{label}: {status['status']}" + (f" ({detail})" if detail else ""))
 
 
 def cmd_review_capture(args: argparse.Namespace) -> None:

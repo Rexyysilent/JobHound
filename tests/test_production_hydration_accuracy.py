@@ -88,7 +88,8 @@ def test_exact_regional_greenhouse_becomes_original_in_same_run(monkeypatch, hos
     assert result.observations[1].parent_observation_ids == [result.observations[0].observation_id]
 
 
-def test_same_run_clock_and_discovery_times_survive_snapshot_replay(monkeypatch, tmp_path):
+@pytest.mark.parametrize("deadline_offset", [None, -1, 5])
+def test_same_run_clock_and_discovery_times_survive_snapshot_replay(monkeypatch, tmp_path, deadline_offset):
     freeze(monkeypatch, hydration, NOW + timedelta(seconds=10))
     freeze(monkeypatch, resolve, NOW + timedelta(seconds=11))
     url = "https://job-boards.eu.greenhouse.io/acme/jobs/123"
@@ -96,6 +97,8 @@ def test_same_run_clock_and_discovery_times_survive_snapshot_replay(monkeypatch,
     raw = [discovery(url), {"source": "greenhouse", "raw": greenhouse(
         other_url, identifier=124, title="Hindi AI Evaluator",
         content=CONTENT + " " + "Review the assigned language samples carefully. " * 30)}]
+    if deadline_offset is not None:
+        raw[1]["raw"]["application_deadline"] = (NOW + timedelta(seconds=deadline_offset)).isoformat()
     result, report = run_hydration(raw, lambda request: httpx.Response(200, json=greenhouse(url)))
     assert report["changed"] == 1
     original_run_id = result.metadata.run_id
@@ -108,6 +111,8 @@ def test_same_run_clock_and_discovery_times_survive_snapshot_replay(monkeypatch,
     assert {o.observation_id: (o.captured_at, o.verified_open_at)
             for o in restored.observations if o.origin == "discovery"} == original_times
     assert decision_fingerprint(restored) == decision_fingerprint(result)
+    assert restored.observations[1].vacancy_state == result.observations[1].vacancy_state
+    assert restored.observations[1].application_route_state == result.observations[1].application_route_state
 
 
 def test_future_dated_hydration_cannot_advance_clock_or_become_apply(monkeypatch):
@@ -277,6 +282,22 @@ def test_budget_deferrals_do_not_exhaust_unattempted_opportunities(monkeypatch, 
     result, report = run_hydration(raw, lambda request: httpx.Response(200, json=greenhouse(url)),
         policy=RetrievalPolicy(request_budget=1, max_retries=0), namespace=tmp_path)
     assert report["changed"] == 1 and result.evaluated[0].assessment.next_action == "apply"
+
+
+def test_repeated_dns_failures_pause_dead_careers_posting(monkeypatch, tmp_path):
+    monkeypatch.setattr(CONFIG.v55, "max_automatic_cycles", 2)
+    calls = []
+    async def dead_domain(url, **kwargs):
+        calls.append(url)
+        raise RuntimeError("dns_resolution_failed")
+    monkeypatch.setattr(hydration, "_validate_destination", dead_domain)
+    raw = [discovery("https://careers.example.org/jobs/bengali", title=TITLE + " - $15/hr")]
+    for cycles in (1, 2):
+        _, report = run_hydration(raw, lambda _: pytest.fail("DNS failed before HTTP"), namespace=tmp_path)
+        assert report["attempts"][0]["verification_cycles"] == cycles
+        assert report["stage_health"]["remote_http_errors"] == 0
+    _, paused = run_hydration(raw, lambda _: pytest.fail("retry is paused"), namespace=tmp_path)
+    assert paused["attempts"] == [] and len(calls) == 2
 
 
 def test_exact_native_leaf_gets_first_verification_slot_within_discovery_source(monkeypatch):

@@ -544,6 +544,8 @@ def _lever_salary(raw: dict) -> str | None:
     else:
         return None
     interval = str(salary.get("interval") or "").strip().casefold()
+    if interval in {"one-time", "one time", "one-time-payment"}:
+        return literal + " one-time"
     units = {
         "hour": "hour", "hourly": "hour", "per-hour-wage": "hour",
         "day": "day", "daily": "day", "per-day-wage": "day",

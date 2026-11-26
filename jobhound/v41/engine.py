@@ -36,6 +36,7 @@ from .models import (
     EligibilityStatus,
     EvaluatedJob,
     Evidence,
+    ListingObservation,
     MatchStrength,
     PayState,
     PriorityKey,
@@ -1079,37 +1080,38 @@ def evaluate_raw(
     metadata = _metadata(as_of)
     observations, failures = build_observations(raw_records)
     if CONFIG.v55.enabled:
-        _initialize_captured_observations(observations, metadata.as_of)
+        for observation in observations:
+            initialize_captured_observation(observation, metadata.as_of)
     return evaluate_observations(observations, as_of=metadata.as_of, raw_count=len(raw_records))
 
 
-def _initialize_captured_observations(observations, as_of):
-    for observation in observations:
-        observation.captured_at = observation.captured_at or as_of
-        raw, job = observation.raw_payload, observation.job
-        if job is None:
-            continue
-        observation.content_hash = hashlib.sha256(job.description.encode('utf-8')).hexdigest()
-        native_full = (
-            observation.source == 'ashby' and bool(raw.get('jobUrl') or raw.get('applyUrl'))
-            and bool(raw.get('descriptionPlain') or raw.get('descriptionHtml'))
-            or observation.source == 'greenhouse' and raw.get('id') is not None
-            and bool(raw.get('absolute_url')) and bool(raw.get('content'))
-            or observation.source == 'lever' and bool(raw.get('id'))
-            and bool(raw.get('hostedUrl')) and bool(raw.get('descriptionPlain') or raw.get('description'))
-        )
-        if native_full and not job.title_truncated:
-            from .posting_deadlines import has_elapsed_deadline
-            expired = has_elapsed_deadline(raw, as_of)
-            observation.identity_state = 'exact'
-            observation.content_state = 'complete'
-            observation.application_route_state = 'account_unknown' if expired else 'observed_public_route'
-            # Ashby isListed=false means a published direct-link-only posting,
-            # not a closed vacancy. Captured deadlines are closure evidence.
-            observation.vacancy_state = 'explicitly_closed' if expired else 'verified_open'
-            observation.verified_open_at = None if expired else as_of
-        else:
-            observation.content_state = 'snippet_only' if observation.source in {'serp', 'adzuna', 'jsearch'} else 'partial'
+def initialize_captured_observation(observation: ListingObservation, as_of: datetime) -> None:
+    """Set discovery evidence as it was known at the time of capture."""
+    observation.captured_at = observation.captured_at or as_of
+    raw, job = observation.raw_payload, observation.job
+    if job is None:
+        return
+    observation.content_hash = hashlib.sha256(job.description.encode('utf-8')).hexdigest()
+    native_full = (
+        observation.source == 'ashby' and bool(raw.get('jobUrl') or raw.get('applyUrl'))
+        and bool(raw.get('descriptionPlain') or raw.get('descriptionHtml'))
+        or observation.source == 'greenhouse' and raw.get('id') is not None
+        and bool(raw.get('absolute_url')) and bool(raw.get('content'))
+        or observation.source == 'lever' and bool(raw.get('id'))
+        and bool(raw.get('hostedUrl')) and bool(raw.get('descriptionPlain') or raw.get('description'))
+    )
+    if native_full and not job.title_truncated:
+        from .posting_deadlines import has_elapsed_deadline
+        expired = has_elapsed_deadline(raw, as_of)
+        observation.identity_state = 'exact'
+        observation.content_state = 'complete'
+        observation.application_route_state = 'account_unknown' if expired else 'observed_public_route'
+        # Ashby isListed=false means a published direct-link-only posting,
+        # not a closed vacancy. Captured deadlines are closure evidence.
+        observation.vacancy_state = 'explicitly_closed' if expired else 'verified_open'
+        observation.verified_open_at = None if expired else as_of
+    else:
+        observation.content_state = 'snippet_only' if observation.source in {'serp', 'adzuna', 'jsearch'} else 'partial'
 
 
 def evaluate_observations(observations, *, as_of=None, raw_count=None) -> RunResult:

@@ -320,6 +320,7 @@ def test_full_compact_and_review_export_keep_same_cohort_and_exact_snapshot(tmp_
     ("explicit_closure_notice", False, "explicitly_closed"),
     ("copy_cannot_extend_original", False, "deadline_elapsed"),
     ("current_original_beats_old_copy", True, "verified_open_recorded"),
+    ("current_original_beats_closed_copy", True, "verified_open_recorded"),
     ("future_original_cannot_extend", False, "deadline_elapsed"),
     ("future_closure_cannot_close", True, "verified_open_recorded"),
 ])
@@ -341,8 +342,11 @@ def test_quality_and_engine_share_current_posting_status_in_full_and_compact(
         old.raw_payload["_closure_evidence"] = {"text": "This exact role is closed."}
     elif scenario == "copy_cannot_extend_original":
         new.source_kind = SourceKind.REPUTABLE_BOARD
-    elif scenario == "current_original_beats_old_copy":
+    elif scenario in {"current_original_beats_old_copy", "current_original_beats_closed_copy"}:
         old.source_kind = SourceKind.REPUTABLE_BOARD
+        old.vacancy_state = "explicitly_closed"
+        if scenario == "current_original_beats_closed_copy":
+            old.raw_payload["_closure_evidence"] = {"text": "No longer accepting applications on this board."}
     elif scenario == "future_original_cannot_extend":
         new.captured_at = new.verified_open_at = run_clock + timedelta(days=1)
     elif scenario == "future_closure_cannot_close":
@@ -434,3 +438,41 @@ def test_oversized_compact_is_nonfatal_keeps_full_output_and_never_prints_stale_
     assert "Compact audit: omitted_size_limit" in printed
     assert str(stale) not in printed
     assert str(tmp_path / "quality.json") in printed
+
+
+@pytest.mark.parametrize("failed_export", ["compact_audit", "quality_report"])
+def test_optional_export_validation_failure_preserves_capture_and_replay(tmp_path, monkeypatch, capsys, failed_export):
+    import asyncio
+    import httpx
+    from jobhound import review_audit
+    from jobhound.cli import _print_quality_exports
+    from jobhound.sources.base import SourceHealth
+    from jobhound.v41 import review
+    from test_source_native_semantics import lever
+
+    async def ingest(**kwargs):
+        health = SourceHealth(source="lever", status="partial", error_type="x" * 513)
+        return [lever()], [health]
+    async def hydrate(*args, **kwargs):
+        return {"changed": 0}
+    monkeypatch.setattr(review, "ingest_raw_with_health", ingest)
+    monkeypatch.setattr(review, "hydrate_result", hydrate)
+    if failed_export == "compact_audit":
+        monkeypatch.setattr(review_audit, "MAX_ROWS", 0)
+    captured, replayed = tmp_path / "capture", tmp_path / "replay"
+    for directory in (captured, replayed):
+        directory.mkdir()
+        (directory / "quality.json").write_text("stale")
+        (directory / "audit.compact.json").write_text("stale")
+    snapshot, digest = asyncio.run(review.capture_review(captured, transport=httpx.MockTransport(
+        lambda request: pytest.fail("unexpected HTTP request"))))
+    output, fingerprint = review.replay_review(snapshot, replayed)
+    assert snapshot.is_file() and digest.is_file() and output.is_file() and (captured / "hydration_report.json").is_file()
+    for directory, name in ((captured, "manifest.json"), (replayed, "replay_manifest.json")):
+        manifest = json.loads((directory / name).read_text())
+        assert manifest["fingerprint"] == fingerprint and (directory / manifest["audit"]).is_file()
+        assert manifest["quality_export_status"][failed_export]["error_type"] == "AuditError"
+        assert manifest["quality_report"] is None and not (directory / "quality.json").exists()
+        assert (directory / "audit.compact.json").is_file() == (failed_export == "quality_report")
+        _print_quality_exports(directory, name)
+        assert "export_failed (AuditError)" in capsys.readouterr().out

@@ -106,11 +106,18 @@ def resolve_posting_status(records: Iterable[Mapping], as_of: datetime) -> Posti
         current.extend(record for record in group
                        if _captured_at(record.get("captured_at")) in {None, latest})
 
+    original_open = any(record.get("vacancy_state") == "verified_open"
+                        and not has_elapsed_deadline(payload(record), now) for record in originals)
     closed, superseded = [], []
     for record in observed:
         if record.get("vacancy_state") != "explicitly_closed":
             continue
         raw = payload(record)
+        # A board's expired listing or closure notice applies to that copy.
+        if original_open and record.get("source_kind") not in original_kinds:
+            if has_elapsed_deadline(raw, now):
+                superseded.append(str(record.get("observation_id") or ""))
+            continue
         old_time = _captured_at(record.get("captured_at"))
         replaced = (not raw.get("_closure_evidence") and has_elapsed_deadline(raw, now)
                     and old_time is not None and any(
